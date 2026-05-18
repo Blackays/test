@@ -46,6 +46,11 @@ class HeroDef {
     required this.fireInterval,
     required this.projSpeed,
     required this.range,
+    required this.abilityName,
+    required this.abilityDesc,
+    required this.abilityCost,
+    required this.abilityCd,
+    this.maxMp = 12,
     this.critChance = 0.05,
     this.projectiles = 1,
     this.lifesteal = 0,
@@ -62,6 +67,7 @@ class HeroDef {
   final Color body;
   final Color accent;
   final double maxHp;
+  final double maxMp;
   final double speed;
   final double damage;
   final double fireInterval;
@@ -74,6 +80,10 @@ class HeroDef {
   final int pierce;
   final double dot;
   final double thorns;
+  final String abilityName;
+  final String abilityDesc;
+  final double abilityCost;
+  final double abilityCd;
 }
 
 const List<HeroDef> kHeroes = [
@@ -85,6 +95,7 @@ const List<HeroDef> kHeroes = [
     body: Color(0xFF8C93A3),
     accent: Color(0xFF4A4F5E),
     maxHp: 18,
+    maxMp: 10,
     speed: 118,
     damage: 1.5,
     fireInterval: 0.70,
@@ -92,6 +103,10 @@ const List<HeroDef> kHeroes = [
     range: 240,
     critChance: 0.03,
     thorns: 1.5,
+    abilityName: 'GROUND SLAM',
+    abilityDesc: 'Shockwave: huge AoE + knockback',
+    abilityCost: 6,
+    abilityCd: 6,
   ),
   HeroDef(
     cls: HeroClass.archer,
@@ -108,6 +123,10 @@ const List<HeroDef> kHeroes = [
     range: 360,
     critChance: 0.10,
     pierce: 1,
+    abilityName: 'ARROW NOVA',
+    abilityDesc: 'Fire arrows in every direction',
+    abilityCost: 6,
+    abilityCd: 7,
   ),
   HeroDef(
     cls: HeroClass.mage,
@@ -117,12 +136,17 @@ const List<HeroDef> kHeroes = [
     body: Color(0xFF8C6CFF),
     accent: Color(0xFF3E2E80),
     maxHp: 6,
+    maxMp: 16,
     speed: 138,
     damage: 2.4,
     fireInterval: 0.88,
     projSpeed: 300,
     range: 320,
     splash: 48,
+    abilityName: 'METEOR',
+    abilityDesc: 'Massive explosion on the pack',
+    abilityCost: 7,
+    abilityCd: 8,
   ),
   HeroDef(
     cls: HeroClass.warlock,
@@ -132,6 +156,7 @@ const List<HeroDef> kHeroes = [
     body: Color(0xFFB05CCB),
     accent: Color(0xFF4F2358),
     maxHp: 7,
+    maxMp: 14,
     speed: 146,
     damage: 0.9,
     fireInterval: 0.50,
@@ -139,6 +164,10 @@ const List<HeroDef> kHeroes = [
     range: 300,
     dot: 2.5,
     lifesteal: 0.3,
+    abilityName: 'PLAGUE WIND',
+    abilityDesc: 'Poison every enemy on screen',
+    abilityCost: 6,
+    abilityCd: 7,
   ),
   HeroDef(
     cls: HeroClass.assassin,
@@ -148,12 +177,17 @@ const List<HeroDef> kHeroes = [
     body: Color(0xFF44485A),
     accent: Color(0xFFE0436B),
     maxHp: 5,
+    maxMp: 10,
     speed: 204,
     damage: 1.6,
     fireInterval: 0.30,
     projSpeed: 480,
     range: 220,
     critChance: 0.25,
+    abilityName: 'SHADOW DASH',
+    abilityDesc: 'Blink to target, burst dmg, brief i-frames',
+    abilityCost: 5,
+    abilityCd: 5,
   ),
   HeroDef(
     cls: HeroClass.gunner,
@@ -163,11 +197,16 @@ const List<HeroDef> kHeroes = [
     body: Color(0xFFD9A24A),
     accent: Color(0xFF7A521C),
     maxHp: 7,
+    maxMp: 12,
     speed: 150,
     damage: 0.8,
     fireInterval: 0.16,
     projSpeed: 520,
     range: 300,
+    abilityName: 'OVERDRIVE',
+    abilityDesc: '4s of insane fire rate',
+    abilityCost: 7,
+    abilityCd: 9,
   ),
 ];
 
@@ -270,7 +309,7 @@ class TitleScreen extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             const Text(
-              'pick a class · clear the floors · get swole',
+              'pick a class · cast · loot · clear the floors',
               style: TextStyle(color: Colors.white54, fontSize: 13),
             ),
             const SizedBox(height: 40),
@@ -338,11 +377,11 @@ class _HeroCard extends StatelessWidget {
         child: Row(
           children: [
             SizedBox(
-              width: 84,
-              height: 84,
+              width: 80,
+              height: 80,
               child: CustomPaint(painter: HeroPreviewPainter(def: def)),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -350,12 +389,14 @@ class _HeroCard extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Text(
-                        def.name,
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          color: def.body,
+                      Flexible(
+                        child: Text(
+                          def.name,
+                          style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w900,
+                            color: def.body,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -377,23 +418,21 @@ class _HeroCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 3),
+                  Text(def.tagline,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 11)),
+                  const SizedBox(height: 6),
                   Text(
-                    def.tagline,
-                    style:
-                        const TextStyle(color: Colors.white54, fontSize: 11),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'HP ${def.maxHp.toInt()}  SPD ${def.speed.toInt()}  '
-                    'DMG ${def.damage}  ROF '
-                    '${(1 / def.fireInterval).toStringAsFixed(1)}/s',
+                    'HP ${def.maxHp.toInt()}  MP ${def.maxMp.toInt()}  '
+                    'DMG ${def.damage}  SPD ${def.speed.toInt()}',
                     style:
                         const TextStyle(color: Colors.white38, fontSize: 10),
                   ),
+                  const SizedBox(height: 2),
                   Text(
-                    _perk(def),
+                    '✦ ${def.abilityName}: ${def.abilityDesc}',
                     style: TextStyle(
-                        color: def.body, fontSize: 10, height: 1.4),
+                        color: def.body, fontSize: 10, height: 1.3),
                   ),
                 ],
               ),
@@ -402,18 +441,6 @@ class _HeroCard extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _perk(HeroDef d) {
-    final p = <String>[];
-    if (d.thorns > 0) p.add('THORNS ${d.thorns}');
-    if (d.pierce > 0) p.add('PIERCE ${d.pierce}');
-    if (d.splash > 0) p.add('SPLASH');
-    if (d.dot > 0) p.add('POISON');
-    if (d.lifesteal > 0) p.add('LIFESTEAL');
-    if (d.critChance >= 0.2) p.add('HIGH CRIT');
-    if (d.projectiles > 1) p.add('${d.projectiles}x SHOT');
-    return p.isEmpty ? 'BALANCED' : p.join(' · ');
   }
 }
 
@@ -425,6 +452,8 @@ class Player {
       : pos = Offset.zero,
         hp = def.maxHp,
         maxHp = def.maxHp,
+        mp = def.maxMp,
+        maxMp = def.maxMp,
         speed = def.speed,
         damage = def.damage,
         fireInterval = def.fireInterval,
@@ -442,6 +471,9 @@ class Player {
   Offset pos;
   double hp;
   double maxHp;
+  double mp;
+  double maxMp;
+  double mpRegen = 1.0;
   double speed;
   double damage;
   double fireInterval;
@@ -454,17 +486,23 @@ class Player {
   int pierce;
   double dot;
   double thorns;
+
   double fireTimer = 0;
   double regen = 0;
   double hurtFlash = 0;
+  double abilityTimer = 0;
+  double invuln = 0;
+  double frenzy = 0;
 
   int level = 1;
   int xp = 0;
   int xpToNext = 5;
   int kills = 0;
+  int obols = 0;
 
   int get buffStage => (level - 1) ~/ 3 < 3 ? (level - 1) ~/ 3 : 3;
   double get radius => 16 + buffStage * 3.0;
+  double get effFire => frenzy > 0 ? fireInterval * 0.32 : fireInterval;
 }
 
 class Enemy {
@@ -475,6 +513,7 @@ class Enemy {
     required this.damage,
     required this.radius,
     required this.kind,
+    required this.bounty,
   }) : maxHp = hp;
 
   Offset pos;
@@ -484,6 +523,7 @@ class Enemy {
   double damage;
   double radius;
   int kind; // 0 hater 1 zoomer 2 chonk 3 boss 4 spitter
+  int bounty;
   double touchTimer = 0;
   double shootTimer = 1.4;
   double dotTimer = 0;
@@ -491,8 +531,8 @@ class Enemy {
 }
 
 class Bolt {
-  Bolt(this.pos, this.vel, this.damage, this.crit,
-      this.pierce, this.splash, this.dot);
+  Bolt(this.pos, this.vel, this.damage, this.crit, this.pierce, this.splash,
+      this.dot);
   Offset pos;
   Offset vel;
   double damage;
@@ -517,6 +557,13 @@ class Orb {
   Offset pos;
 }
 
+class Burst {
+  Burst(this.pos, this.maxR);
+  Offset pos;
+  double maxR;
+  double t = 0;
+}
+
 class FloatText {
   FloatText(this.pos, this.text, this.color);
   Offset pos;
@@ -529,7 +576,7 @@ class GameStats {
   static int bestWave = 0;
 }
 
-enum Phase { playing, levelUp, waveCleared, gameOver, victory }
+enum Phase { playing, levelUp, doors, shop, waveCleared, gameOver, victory }
 
 /// ---------------------------------------------------------------------------
 /// Game screen
@@ -556,6 +603,7 @@ class _GameScreenState extends State<GameScreen>
   final List<Bolt> _bolts = [];
   final List<EBolt> _ebolts = [];
   final List<Orb> _orbs = [];
+  final List<Burst> _bursts = [];
   final List<FloatText> _texts = [];
 
   Phase _phase = Phase.playing;
@@ -570,10 +618,19 @@ class _GameScreenState extends State<GameScreen>
   static const double _stickR = 60;
 
   List<Upgrade> _choices = [];
+  bool _boonThenNext = false;
+  List<ShopItem> _shop = [];
+  List<DoorDef> _doors = [];
 
   int get _floorIdx =>
       ((_wave - 1) ~/ kWavesPerFloor).clamp(0, kFloors.length - 1).toInt();
   FloorDef get _floor => kFloors[_floorIdx];
+  bool get _bossWave => _wave % kWavesPerFloor == 0;
+
+  Rect get _abilityRect {
+    return Rect.fromLTWH(
+        _size.width - 98, _size.height - 108, 78, 78);
+  }
 
   @override
   void initState() {
@@ -595,10 +652,12 @@ class _GameScreenState extends State<GameScreen>
     _bolts.clear();
     _ebolts.clear();
     _orbs.clear();
+    _bursts.clear();
     _texts.clear();
     _wave = 1;
     _waveTime = kWaveTime;
     _spawnTimer = 0;
+    _boonThenNext = false;
     _phase = Phase.playing;
     _ready = true;
   }
@@ -627,15 +686,24 @@ class _GameScreenState extends State<GameScreen>
       );
     }
     if (_p.hurtFlash > 0) _p.hurtFlash -= dt;
+    if (_p.invuln > 0) _p.invuln -= dt;
+    if (_p.frenzy > 0) _p.frenzy -= dt;
+    if (_p.abilityTimer > 0) _p.abilityTimer -= dt;
     if (_p.regen > 0) {
       _p.hp = (_p.hp + _p.regen * dt).clamp(0, _p.maxHp).toDouble();
     }
+    _p.mp = (_p.mp + _p.mpRegen * dt).clamp(0, _p.maxMp).toDouble();
+
+    for (final b in _bursts) {
+      b.t += dt;
+    }
+    _bursts.removeWhere((b) => b.t > 0.35);
 
     _waveTime -= dt;
     if (_waveTime <= 0) {
       _enemies.clear();
       _ebolts.clear();
-      _phase = Phase.waveCleared;
+      _onWaveCleared();
       return;
     }
 
@@ -648,10 +716,10 @@ class _GameScreenState extends State<GameScreen>
 
     _p.fireTimer -= dt;
     if (_p.fireTimer <= 0) {
-      final target = _nearestEnemy();
+      final target = _nearestEnemy(_p.range);
       if (target != null) {
-        _fire(target);
-        _p.fireTimer = _p.fireInterval;
+        _fireAt((target.pos - _p.pos));
+        _p.fireTimer = _p.effFire;
       }
     }
 
@@ -687,14 +755,13 @@ class _GameScreenState extends State<GameScreen>
       final d = dir.distance;
 
       if (e.kind == 4) {
-        // spitter keeps distance and shoots
-        if (d < 220) {
+        if (d < 220 && d > 0.01) {
           e.pos -= dir / d * e.speed * dt;
         } else if (d > 300) {
           e.pos += dir / d * e.speed * dt;
         }
         e.shootTimer -= dt;
-        if (e.shootTimer <= 0 && d < 420) {
+        if (e.shootTimer <= 0 && d < 420 && d > 0.01) {
           e.shootTimer = 1.7;
           _ebolts.add(EBolt(e.pos, dir / d * 220, e.damage));
         }
@@ -731,14 +798,13 @@ class _GameScreenState extends State<GameScreen>
             e.dotTimer = 2.0;
           }
           if (b.splash > 0) {
+            _bursts.add(Burst(b.pos, b.splash));
             for (final o in _enemies) {
               if (o == e) continue;
               if ((o.pos - b.pos).distance < b.splash) {
                 _damageEnemy(o, b.damage * 0.6, false);
               }
             }
-            _texts.add(FloatText(
-                b.pos, 'BOOM', const Color(0xFFFF9A3C)));
             b.life = 0;
             break;
           }
@@ -755,6 +821,8 @@ class _GameScreenState extends State<GameScreen>
     _enemies.removeWhere((e) {
       if (e.hp <= 0) {
         _orbs.add(Orb(e.pos));
+        _p.obols += e.bounty;
+        _p.mp = (_p.mp + 0.8).clamp(0, _p.maxMp).toDouble();
         if (_p.lifesteal > 0) {
           _p.hp = (_p.hp + _p.lifesteal).clamp(0, _p.maxHp).toDouble();
         }
@@ -767,7 +835,7 @@ class _GameScreenState extends State<GameScreen>
     for (final o in _orbs) {
       final dir = _p.pos - o.pos;
       final d = dir.distance;
-      if (d < 120) o.pos += dir / d * 250 * dt;
+      if (d < 120 && d > 0.01) o.pos += dir / d * 250 * dt;
     }
     _orbs.removeWhere((o) {
       if ((o.pos - _p.pos).distance < _p.radius + 8) {
@@ -785,6 +853,7 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _hurtPlayer(double dmg) {
+    if (_p.invuln > 0) return;
     _p.hp -= dmg;
     _p.hurtFlash = 0.25;
     if (_p.hp <= 0) {
@@ -802,9 +871,9 @@ class _GameScreenState extends State<GameScreen>
     ));
   }
 
-  Enemy? _nearestEnemy() {
+  Enemy? _nearestEnemy(double maxRange) {
     Enemy? best;
-    double bd = _p.range * _p.range;
+    double bd = maxRange * maxRange;
     for (final e in _enemies) {
       final dx = e.pos.dx - _p.pos.dx;
       final dy = e.pos.dy - _p.pos.dy;
@@ -817,9 +886,8 @@ class _GameScreenState extends State<GameScreen>
     return best;
   }
 
-  void _fire(Enemy target) {
-    final base = target.pos - _p.pos;
-    final baseAng = atan2(base.dy, base.dx);
+  void _fireAt(Offset aim) {
+    final baseAng = atan2(aim.dy, aim.dx);
     final n = _p.projectiles;
     final spread = n > 1 ? 0.16 : 0.0;
     for (var i = 0; i < n; i++) {
@@ -837,6 +905,85 @@ class _GameScreenState extends State<GameScreen>
         _p.dot,
       ));
     }
+  }
+
+  bool get _canCast =>
+      _phase == Phase.playing &&
+      _p.abilityTimer <= 0 &&
+      _p.mp >= widget.def.abilityCost;
+
+  void _castAbility() {
+    if (!_canCast) return;
+    _p.mp -= widget.def.abilityCost;
+    _p.abilityTimer = widget.def.abilityCd;
+    final d = _p.damage;
+    switch (widget.def.cls) {
+      case HeroClass.tank:
+        {
+          _bursts.add(Burst(_p.pos, 150));
+          for (final e in _enemies) {
+            final v = e.pos - _p.pos;
+            if (v.distance < 150) {
+              _damageEnemy(e, d * 4, true);
+              if (v.distance > 0.01) e.pos += v / v.distance * 70;
+            }
+          }
+          break;
+        }
+      case HeroClass.archer:
+        {
+          for (var i = 0; i < 16; i++) {
+            final ang = i * pi / 8;
+            _bolts.add(Bolt(
+              _p.pos,
+              Offset(cos(ang), sin(ang)) * _p.projSpeed,
+              d,
+              false,
+              _p.pierce + 1,
+              _p.splash,
+              _p.dot,
+            ));
+          }
+          break;
+        }
+      case HeroClass.mage:
+        {
+          final tgt = _nearestEnemy(900);
+          final at = tgt?.pos ?? _p.pos;
+          _bursts.add(Burst(at, 130));
+          for (final e in _enemies) {
+            if ((e.pos - at).distance < 130) _damageEnemy(e, d * 5, true);
+          }
+          break;
+        }
+      case HeroClass.warlock:
+        {
+          for (final e in _enemies) {
+            _damageEnemy(e, d * 2, false);
+            e.dotDps = (_p.dot < 3 ? 3.0 : _p.dot);
+            e.dotTimer = 4;
+          }
+          break;
+        }
+      case HeroClass.assassin:
+        {
+          final tgt = _nearestEnemy(900);
+          if (tgt != null) _p.pos = tgt.pos;
+          _p.invuln = 1.0;
+          _bursts.add(Burst(_p.pos, 70));
+          for (final e in _enemies) {
+            if ((e.pos - _p.pos).distance < 70) _damageEnemy(e, d * 6, true);
+          }
+          break;
+        }
+      case HeroClass.gunner:
+        {
+          _p.frenzy = 4;
+          break;
+        }
+    }
+    _texts.add(FloatText(_p.pos.translate(0, -_p.radius - 16),
+        widget.def.abilityName, const Color(0xFF8CC8FF)));
   }
 
   void _spawnEnemy() {
@@ -860,8 +1007,7 @@ class _GameScreenState extends State<GameScreen>
     final f = _floor;
     final ws = 1 + _wave * 0.05;
 
-    if (_wave % kWavesPerFloor == 0 &&
-        _enemies.where((e) => e.kind == 3).isEmpty) {
+    if (_bossWave && _enemies.where((e) => e.kind == 3).isEmpty) {
       _enemies.add(Enemy(
         pos: p,
         hp: (26 + _wave * 5) * f.hpMul,
@@ -869,6 +1015,7 @@ class _GameScreenState extends State<GameScreen>
         damage: 2.5 * f.dmgMul,
         radius: 36,
         kind: 3,
+        bounty: 25,
       ));
       return;
     }
@@ -882,6 +1029,7 @@ class _GameScreenState extends State<GameScreen>
         damage: 1.0 * f.dmgMul,
         radius: 14,
         kind: 4,
+        bounty: 2,
       ));
     } else if (roll < 0.30 + _floorIdx * 0.02) {
       _enemies.add(Enemy(
@@ -891,6 +1039,7 @@ class _GameScreenState extends State<GameScreen>
         damage: 1.0 * f.dmgMul,
         radius: 11,
         kind: 1,
+        bounty: 1,
       ));
     } else if (roll < 0.44) {
       _enemies.add(Enemy(
@@ -900,6 +1049,7 @@ class _GameScreenState extends State<GameScreen>
         damage: 2.0 * f.dmgMul,
         radius: 23,
         kind: 2,
+        bounty: 3,
       ));
     } else {
       _enemies.add(Enemy(
@@ -909,6 +1059,7 @@ class _GameScreenState extends State<GameScreen>
         damage: 1.0 * f.dmgMul,
         radius: 15,
         kind: 0,
+        bounty: 1,
       ));
     }
   }
@@ -919,9 +1070,30 @@ class _GameScreenState extends State<GameScreen>
       _p.xp -= _p.xpToNext;
       _p.level++;
       _p.xpToNext = 5 + _p.level * 3;
-      _choices = (List<Upgrade>.from(kUpgrades)..shuffle(_rng)).take(3).toList();
-      _phase = Phase.levelUp;
+      _openBoon();
     }
+  }
+
+  void _openBoon() {
+    _choices = _rollUpgrades();
+    _phase = Phase.levelUp;
+  }
+
+  List<Upgrade> _rollUpgrades() {
+    final bag = <Upgrade>[];
+    for (final u in kUpgrades) {
+      final n = u.tier == 0 ? 4 : (u.tier == 1 ? 2 : 1);
+      for (var i = 0; i < n; i++) {
+        bag.add(u);
+      }
+    }
+    bag.shuffle(_rng);
+    final out = <Upgrade>[];
+    for (final u in bag) {
+      if (!out.contains(u)) out.add(u);
+      if (out.length == 3) break;
+    }
+    return out;
   }
 
   void _pickUpgrade(Upgrade u) {
@@ -932,35 +1104,113 @@ class _GameScreenState extends State<GameScreen>
       _p.xp -= _p.xpToNext;
       _p.level++;
       _p.xpToNext = 5 + _p.level * 3;
-      _choices =
-          (List<Upgrade>.from(kUpgrades)..shuffle(_rng)).take(3).toList();
-      setState(() => _phase = Phase.levelUp);
+      setState(_openBoon);
+    } else if (_boonThenNext) {
+      _boonThenNext = false;
+      _nextWave();
     } else {
       setState(() => _phase = Phase.playing);
     }
   }
 
-  void _nextWave() {
+  void _onWaveCleared() {
+    _p.obols += 3 + _wave * 2;
     if (_wave >= kMaxWaves) {
       if (_wave > GameStats.bestWave) GameStats.bestWave = _wave;
-      setState(() => _phase = Phase.victory);
+      _phase = Phase.victory;
       return;
     }
-    _wave++;
     if (_wave - 1 > GameStats.bestWave) GameStats.bestWave = _wave - 1;
+    if (_bossWave) {
+      _shop = _rollShop();
+      _phase = Phase.shop;
+    } else {
+      _doors = _rollDoors();
+      _phase = Phase.doors;
+    }
+  }
+
+  void _nextWave() {
+    _wave++;
     _waveTime = kWaveTime;
     _spawnTimer = 0;
-    _p.hp = (_p.hp + _p.maxHp * 0.25).clamp(0, _p.maxHp).toDouble();
+    _p.hp = (_p.hp + _p.maxHp * 0.15).clamp(0, _p.maxHp).toDouble();
     setState(() => _phase = Phase.playing);
   }
 
-  void _gameOver() {
-    if (_wave > GameStats.bestWave) GameStats.bestWave = _wave;
-    _phase = Phase.gameOver;
+  // ---- shop ----
+  List<ShopItem> _rollShop() {
+    final mul = 1 + _floorIdx * 0.6;
+    int price(num base) => (base * mul).round();
+    final all = <ShopItem>[
+      ShopItem('HEALTH POTION', 'heal 50% max HP', price(8), (p) {
+        p.hp = (p.hp + p.maxHp * 0.5).clamp(0, p.maxHp).toDouble();
+      }),
+      ShopItem('FULL HEAL', 'restore all HP', price(16),
+          (p) => p.hp = p.maxHp),
+      ShopItem('MANA POTION', 'restore all MP', price(7),
+          (p) => p.mp = p.maxMp),
+      ShopItem('+2 MAX HP', 'and heal that much', price(12), (p) {
+        p.maxHp += 2;
+        p.hp += 2;
+      }),
+      ShopItem('+3 MAX MP', 'bigger mana pool', price(12), (p) {
+        p.maxMp += 3;
+        p.mp += 3;
+      }),
+      ShopItem('+1 DAMAGE', 'hit harder', price(15), (p) => p.damage += 1),
+      ShopItem('+15 SPEED', 'move faster', price(12), (p) => p.speed += 15),
+      ShopItem('+15% ATK SPEED', 'shoot faster', price(16),
+          (p) => p.fireInterval = (p.fireInterval * 0.85).toDouble()),
+      ShopItem('+6% CRIT', 'more big hits', price(14),
+          (p) => p.critChance += 0.06),
+      ShopItem('+0.6 MP REGEN', 'cast more often', price(17),
+          (p) => p.mpRegen += 0.6),
+      ShopItem('+0.3 LIFESTEAL', 'heal on kill', price(18),
+          (p) => p.lifesteal += 0.3),
+    ]..shuffle(_rng);
+    return all.take(6).toList();
   }
 
+  void _buy(ShopItem item) {
+    if (item.sold || _p.obols < item.price) return;
+    _p.obols -= item.price;
+    item.apply(_p);
+    setState(() => item.sold = true);
+  }
+
+  // ---- doors (Hades-style reward choice) ----
+  List<DoorDef> _rollDoors() {
+    final pool = <DoorDef>[
+      DoorDef('💰', 'TREASURE', '+${10 + _floorIdx * 8} obols',
+          (p) => p.obols += 10 + _floorIdx * 8),
+      DoorDef('❤', 'FOUNTAIN', 'heal 40% HP + 50% MP', (p) {
+        p.hp = (p.hp + p.maxHp * 0.4).clamp(0, p.maxHp).toDouble();
+        p.mp = (p.mp + p.maxMp * 0.5).clamp(0, p.maxMp).toDouble();
+      }),
+      DoorDef('✦', 'BOON', 'pick a power-up', (_) {}),
+      DoorDef('🗡', 'ARSENAL', '+1 projectile',
+          (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt()),
+      DoorDef('⚡', 'OVERCHARGE', '+0.5 MP regen',
+          (p) => p.mpRegen += 0.5),
+    ]..shuffle(_rng);
+    return pool.take(2).toList();
+  }
+
+  void _pickDoor(DoorDef door) {
+    if (door.title == 'BOON') {
+      _boonThenNext = true;
+      setState(_openBoon);
+      return;
+    }
+    door.apply(_p);
+    _nextWave();
+  }
+
+  // ---- input ----
   void _panStart(DragStartDetails d) {
     if (_phase != Phase.playing) return;
+    if (_abilityRect.contains(d.localPosition)) return;
     _stickOn = true;
     _stickOrigin = d.localPosition;
     _stickKnob = d.localPosition;
@@ -1009,6 +1259,7 @@ class _GameScreenState extends State<GameScreen>
                       bolts: _bolts,
                       ebolts: _ebolts,
                       orbs: _orbs,
+                      bursts: _bursts,
                       texts: _texts,
                       floor: _floor,
                       stickOn: _stickOn,
@@ -1019,14 +1270,58 @@ class _GameScreenState extends State<GameScreen>
                   ),
                 ),
                 if (_ready) _hud(),
+                if (_ready && _phase == Phase.playing) _abilityButton(),
                 if (_phase == Phase.levelUp) _levelUpOverlay(),
-                if (_phase == Phase.waveCleared) _waveClearedOverlay(),
+                if (_phase == Phase.doors) _doorsOverlay(),
+                if (_phase == Phase.shop) _shopOverlay(),
                 if (_phase == Phase.gameOver) _endOverlay(false),
                 if (_phase == Phase.victory) _endOverlay(true),
               ],
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _abilityButton() {
+    final ready = _canCast;
+    final cdFrac = (_p.abilityTimer / widget.def.abilityCd).clamp(0.0, 1.0);
+    return Positioned(
+      left: _abilityRect.left,
+      top: _abilityRect.top,
+      width: _abilityRect.width,
+      height: _abilityRect.height,
+      child: GestureDetector(
+        onTap: _castAbility,
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: ready
+                ? const Color(0xFF2A5BD7)
+                : const Color(0xFF24242F),
+            border: Border.all(
+                color: ready ? const Color(0xFF8CC8FF) : Colors.white24,
+                width: 2),
+          ),
+          alignment: Alignment.center,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('✦',
+                  style: TextStyle(fontSize: 22, color: Colors.white)),
+              Text(
+                cdFrac > 0
+                    ? '${(_p.abilityTimer).toStringAsFixed(1)}s'
+                    : '${widget.def.abilityCost.toInt()} MP',
+                style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1039,48 +1334,53 @@ class _GameScreenState extends State<GameScreen>
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: Column(
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'F${_floorIdx + 1} · ${_floor.name}',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
-                        color: Color(0xFFFFD45E)),
+                  Flexible(
+                    child: Text(
+                      'F${_floorIdx + 1} ${_floor.name}',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          color: Color(0xFFFFD45E)),
+                    ),
                   ),
-                  Text(
-                    'W$_wave/$kMaxWaves',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
-                        color: Colors.white70),
-                  ),
-                  Text(
-                    '⏱ ${_waveTime.ceil()}s',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
-                        color: Colors.white),
-                  ),
-                  Text(
-                    'LV ${_p.level}',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
-                        color: Color(0xFF8CC8FF)),
-                  ),
+                  Text('W$_wave/$kMaxWaves',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          color: Colors.white70)),
+                  Text('⏱${_waveTime.ceil()}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          color: Colors.white)),
+                  Text('💰${_p.obols}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          color: Color(0xFFFFD45E))),
+                  Text('LV${_p.level}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          color: Color(0xFF8CC8FF))),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 5),
               _bar(_p.hp / _p.maxHp, const Color(0xFFFF5C6C),
                   'HP ${_p.hp.ceil()}/${_p.maxHp.toInt()}'),
-              const SizedBox(height: 4),
-              _bar(_p.xp / _p.xpToNext, const Color(0xFF8CC8FF), null,
-                  thin: true),
+              const SizedBox(height: 3),
+              _bar(_p.mp / _p.maxMp, const Color(0xFF3F8BFF),
+                  'MP ${_p.mp.floor()}/${_p.maxMp.toInt()}', h: 12),
+              const SizedBox(height: 3),
+              _bar(_p.xp / _p.xpToNext, const Color(0xFF8CFF98), null,
+                  h: 6),
             ],
           ),
         ),
@@ -1088,12 +1388,12 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
-  Widget _bar(double v, Color color, String? label, {bool thin = false}) {
+  Widget _bar(double v, Color color, String? label, {double h = 18}) {
     return Stack(
       alignment: Alignment.center,
       children: [
         Container(
-          height: thin ? 8 : 18,
+          height: h,
           decoration: BoxDecoration(
             color: Colors.black38,
             borderRadius: BorderRadius.circular(10),
@@ -1112,7 +1412,7 @@ class _GameScreenState extends State<GameScreen>
         if (label != null)
           Text(label,
               style: const TextStyle(
-                  fontSize: 11,
+                  fontSize: 10,
                   fontWeight: FontWeight.bold,
                   color: Colors.white)),
       ],
@@ -1122,10 +1422,10 @@ class _GameScreenState extends State<GameScreen>
   Widget _scrim(Widget child) {
     return Positioned.fill(
       child: Container(
-        color: Colors.black.withValues(alpha: 0.74),
+        color: Colors.black.withValues(alpha: 0.78),
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(20),
             child: child,
           ),
         ),
@@ -1139,47 +1439,139 @@ class _GameScreenState extends State<GameScreen>
       children: [
         const Text('LEVEL UP!',
             style: TextStyle(
-                fontSize: 34,
+                fontSize: 32,
                 fontWeight: FontWeight.w900,
                 color: Color(0xFF8CFF98))),
         const SizedBox(height: 4),
-        const Text('get swole — pick one',
-            style: TextStyle(color: Colors.white60)),
-        const SizedBox(height: 20),
+        const Text('pick a boon', style: TextStyle(color: Colors.white60)),
+        const SizedBox(height: 18),
         for (final u in _choices)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: 10),
             child: _UpgradeCard(u: u, onTap: () => _pickUpgrade(u)),
           ),
       ],
     ));
   }
 
-  Widget _waveClearedOverlay() {
-    final bossCleared = _wave % kWavesPerFloor == 0;
+  Widget _doorsOverlay() {
     return _scrim(Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(bossCleared ? 'FLOOR CLEARED' : 'WAVE $_wave CLEARED',
+        Text('WAVE $_wave CLEARED',
             style: const TextStyle(
-                fontSize: 30,
+                fontSize: 26,
                 fontWeight: FontWeight.w900,
                 color: Color(0xFFFFD45E))),
-        const SizedBox(height: 8),
-        Text('kills: ${_p.kills}   ·   +25% HP restored',
-            style: const TextStyle(color: Colors.white60)),
-        if (bossCleared && _wave < kMaxWaves) ...[
-          const SizedBox(height: 8),
-          Text(
-            'next: ${kFloors[(_floorIdx + 1).clamp(0, kFloors.length - 1).toInt()].name}',
-            style: const TextStyle(
-                color: Color(0xFFFF8A4C), fontWeight: FontWeight.bold),
+        const SizedBox(height: 4),
+        const Text('choose your door', style: TextStyle(color: Colors.white60)),
+        const SizedBox(height: 20),
+        for (final dr in _doors)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => _pickDoor(dr),
+              child: Container(
+                width: 320,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 18, vertical: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1F1D2E),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                      color: const Color(0xFFFFD45E), width: 1.5),
+                ),
+                child: Row(
+                  children: [
+                    Text(dr.icon, style: const TextStyle(fontSize: 30)),
+                    const SizedBox(width: 16),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(dr.title,
+                            style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFFFFD45E))),
+                        Text(dr.desc,
+                            style: const TextStyle(
+                                color: Colors.white60, fontSize: 12)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
-        ],
-        const SizedBox(height: 24),
+      ],
+    ));
+  }
+
+  Widget _shopOverlay() {
+    return _scrim(Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text('CHARON\'S SHOP',
+            style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFFFFD45E))),
+        const SizedBox(height: 2),
+        Text('floor cleared · 💰 ${_p.obols}',
+            style: const TextStyle(color: Colors.white60)),
+        const SizedBox(height: 16),
+        for (final it in _shop)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Opacity(
+              opacity: it.sold ? 0.35 : 1,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _buy(it),
+                child: Container(
+                  width: 330,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1F1D2E),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: _p.obols >= it.price && !it.sold
+                            ? const Color(0xFFFFD45E)
+                            : Colors.white24),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(it.sold ? '${it.title} (SOLD)' : it.title,
+                                style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white)),
+                            Text(it.desc,
+                                style: const TextStyle(
+                                    color: Colors.white54, fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                      Text('💰${it.price}',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFFFFD45E))),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        const SizedBox(height: 6),
         _BigButton(
-          label: _wave >= kMaxWaves ? 'FINISH' : 'CONTINUE',
-          color: const Color(0xFFFFD45E),
+          label: _wave >= kMaxWaves ? 'FINISH' : 'LEAVE SHOP',
+          color: const Color(0xFF8CC8FF),
           onTap: _nextWave,
         ),
       ],
@@ -1193,7 +1585,7 @@ class _GameScreenState extends State<GameScreen>
         Text(win ? 'YOU CLEARED THE VOID!' : 'GET REKT',
             textAlign: TextAlign.center,
             style: TextStyle(
-                fontSize: 34,
+                fontSize: 32,
                 fontWeight: FontWeight.w900,
                 color:
                     win ? const Color(0xFF8CFF98) : const Color(0xFFFF5C6C))),
@@ -1206,7 +1598,7 @@ class _GameScreenState extends State<GameScreen>
         const SizedBox(height: 4),
         Text('best: wave ${GameStats.bestWave}',
             style: const TextStyle(color: Colors.white38)),
-        const SizedBox(height: 24),
+        const SizedBox(height: 22),
         _BigButton(
           label: 'PLAY AGAIN',
           color: const Color(0xFFFFD45E),
@@ -1227,37 +1619,66 @@ class _GameScreenState extends State<GameScreen>
 }
 
 /// ---------------------------------------------------------------------------
-/// Upgrades
+/// Upgrades / Shop / Doors
 /// ---------------------------------------------------------------------------
 class Upgrade {
-  const Upgrade(this.title, this.desc, this.apply);
+  const Upgrade(this.title, this.desc, this.tier, this.apply);
+  final String title;
+  final String desc;
+  final int tier; // 0 common 1 rare 2 epic
+  final void Function(Player p) apply;
+}
+
+const Color _cCommon = Color(0xFF8CFF98);
+const Color _cRare = Color(0xFF8CC8FF);
+const Color _cEpic = Color(0xFFE0A0FF);
+
+Color _tierColor(int t) => t == 0 ? _cCommon : (t == 1 ? _cRare : _cEpic);
+
+final List<Upgrade> kUpgrades = [
+  Upgrade('MUCH DAMAGE', '+1 damage', 0, (p) => p.damage += 1),
+  Upgrade('VERY SPEED', '+18 move speed', 0, (p) => p.speed += 18),
+  Upgrade('SO TANKY', '+3 max HP & heal', 0, (p) {
+    p.maxHp += 3;
+    p.hp = (p.hp + 3).clamp(0, p.maxHp).toDouble();
+  }),
+  Upgrade('REGEN', '+0.6 HP / sec', 0, (p) => p.regen += 0.6),
+  Upgrade('LONG REACH', '+70 range', 0, (p) => p.range += 70),
+  Upgrade('FAST BONK', '+90 projectile speed', 0, (p) => p.projSpeed += 90),
+  Upgrade('BIG BRAIN', '+2 max MP', 0, (p) {
+    p.maxMp += 2;
+    p.mp += 2;
+  }),
+  Upgrade('WOW CRIT', '+9% crit chance', 1, (p) => p.critChance += 0.09),
+  Upgrade('RAPID BONK', '+24% attack speed', 1,
+      (p) => p.fireInterval = (p.fireInterval * 0.76).clamp(0.05, 5).toDouble()),
+  Upgrade('VAMPIRE', '+0.4 HP per kill', 1, (p) => p.lifesteal += 0.4),
+  Upgrade('PLAGUE', '+1.5 poison dps', 1, (p) => p.dot += 1.5),
+  Upgrade('SPIKES', '+1 thorns damage', 1, (p) => p.thorns += 1),
+  Upgrade('FOCUS', '+0.7 MP regen', 1, (p) => p.mpRegen += 0.7),
+  Upgrade('MULTI BONK', '+1 projectile', 2,
+      (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt()),
+  Upgrade('BIG BOOM', '+24 splash radius', 2, (p) => p.splash += 24),
+  Upgrade('PIERCING', '+2 pierce', 2,
+      (p) => p.pierce = (p.pierce + 2).clamp(0, 12).toInt()),
+];
+
+class ShopItem {
+  ShopItem(this.title, this.desc, this.price, this.apply);
+  final String title;
+  final String desc;
+  final int price;
+  final void Function(Player p) apply;
+  bool sold = false;
+}
+
+class DoorDef {
+  DoorDef(this.icon, this.title, this.desc, this.apply);
+  final String icon;
   final String title;
   final String desc;
   final void Function(Player p) apply;
 }
-
-final List<Upgrade> kUpgrades = [
-  Upgrade('MUCH DAMAGE', '+1 damage', (p) => p.damage += 1),
-  Upgrade('VERY SPEED', '+18 move speed', (p) => p.speed += 18),
-  Upgrade('SO TANKY', '+3 max HP & heal', (p) {
-    p.maxHp += 3;
-    p.hp = (p.hp + 3).clamp(0, p.maxHp).toDouble();
-  }),
-  Upgrade('WOW CRIT', '+8% crit chance', (p) => p.critChance += 0.08),
-  Upgrade('RAPID BONK', '+22% attack speed',
-      (p) => p.fireInterval = (p.fireInterval * 0.78).clamp(0.06, 5).toDouble()),
-  Upgrade('LONG REACH', '+70 range', (p) => p.range += 70),
-  Upgrade('FAST BONK', '+90 projectile speed', (p) => p.projSpeed += 90),
-  Upgrade('MULTI BONK', '+1 projectile',
-      (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt()),
-  Upgrade('VAMPIRE', '+0.4 HP per kill', (p) => p.lifesteal += 0.4),
-  Upgrade('REGEN', '+0.6 HP / sec', (p) => p.regen += 0.6),
-  Upgrade('PIERCING', '+1 pierce',
-      (p) => p.pierce = (p.pierce + 1).clamp(0, 8).toInt()),
-  Upgrade('BIG BOOM', '+22 splash radius', (p) => p.splash += 22),
-  Upgrade('PLAGUE', '+1.5 poison dps', (p) => p.dot += 1.5),
-  Upgrade('SPIKES', '+1 thorns damage', (p) => p.thorns += 1),
-];
 
 class _UpgradeCard extends StatelessWidget {
   const _UpgradeCard({required this.u, required this.onTap});
@@ -1266,6 +1687,8 @@ class _UpgradeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = _tierColor(u.tier);
+    final tn = u.tier == 0 ? 'COMMON' : (u.tier == 1 ? 'RARE' : 'EPIC');
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: onTap,
@@ -1275,16 +1698,26 @@ class _UpgradeCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFF1F1D2E),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFF8CFF98), width: 1.5),
+          border: Border.all(color: c, width: 1.8),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(u.title,
-                style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF8CFF98))),
+            Row(
+              children: [
+                Text(u.title,
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: c)),
+                const Spacer(),
+                Text(tn,
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: c)),
+              ],
+            ),
             const SizedBox(height: 2),
             Text(u.desc,
                 style: const TextStyle(color: Colors.white60, fontSize: 13)),
@@ -1295,9 +1728,6 @@ class _UpgradeCard extends StatelessWidget {
   }
 }
 
-/// ---------------------------------------------------------------------------
-/// Shared widgets
-/// ---------------------------------------------------------------------------
 class _BigButton extends StatelessWidget {
   const _BigButton(
       {required this.label, required this.color, required this.onTap});
@@ -1351,7 +1781,9 @@ void _drawHero(Canvas canvas, Offset c, double r, HeroDef def, int stage) {
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromCenter(
-              center: c.translate(0, -r * 1.05), width: r * 1.7, height: r * 0.5),
+              center: c.translate(0, -r * 1.05),
+              width: r * 1.7,
+              height: r * 0.5),
           Radius.circular(r * 0.2),
         ),
         accent,
@@ -1441,8 +1873,12 @@ class HeroPreviewPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    _drawHero(canvas, size.center(Offset.zero).translate(0, size.height * 0.12),
-        size.width * 0.26, def, 2);
+    _drawHero(
+        canvas,
+        size.center(Offset.zero).translate(0, size.height * 0.12),
+        size.width * 0.26,
+        def,
+        2);
   }
 
   @override
@@ -1456,6 +1892,7 @@ class WorldPainter extends CustomPainter {
     required this.bolts,
     required this.ebolts,
     required this.orbs,
+    required this.bursts,
     required this.texts,
     required this.floor,
     required this.stickOn,
@@ -1469,6 +1906,7 @@ class WorldPainter extends CustomPainter {
   final List<Bolt> bolts;
   final List<EBolt> ebolts;
   final List<Orb> orbs;
+  final List<Burst> bursts;
   final List<FloatText> texts;
   final FloorDef floor;
   final bool stickOn;
@@ -1490,7 +1928,19 @@ class WorldPainter extends CustomPainter {
     }
     if (!ready) return;
 
-    final orbP = Paint()..color = const Color(0xFF8CC8FF);
+    for (final b in bursts) {
+      final double f = (b.t / 0.35).clamp(0.0, 1.0).toDouble();
+      canvas.drawCircle(
+        b.pos,
+        b.maxR * f,
+        Paint()
+          ..color = const Color(0xFFFF9A3C).withValues(alpha: (1 - f) * 0.5)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4,
+      );
+    }
+
+    final orbP = Paint()..color = const Color(0xFF8CFF98);
     for (final o in orbs) {
       canvas.drawCircle(o.pos, 5, orbP);
     }
@@ -1539,9 +1989,27 @@ class WorldPainter extends CustomPainter {
       canvas.drawCircle(e.pos, 5, Paint()..color = const Color(0xFFFF4D5E));
     }
 
+    if (player.invuln > 0) {
+      canvas.drawCircle(
+          player.pos,
+          player.radius + 8,
+          Paint()
+            ..color = const Color(0x668CC8FF)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3);
+    }
     if (player.hurtFlash > 0) {
       canvas.drawCircle(player.pos, player.radius + 6,
           Paint()..color = const Color(0x55FF5C6C));
+    }
+    if (player.frenzy > 0) {
+      canvas.drawCircle(
+          player.pos,
+          player.radius + 5,
+          Paint()
+            ..color = const Color(0x66FFD45E)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3);
     }
     _drawHero(canvas, player.pos, player.radius, player.def,
         player.buffStage);
@@ -1551,7 +2019,8 @@ class WorldPainter extends CustomPainter {
         text: TextSpan(
           text: t.text,
           style: TextStyle(
-            color: t.color.withValues(alpha: t.life.clamp(0.0, 1.0).toDouble()),
+            color:
+                t.color.withValues(alpha: t.life.clamp(0.0, 1.0).toDouble()),
             fontSize: 14,
             fontWeight: FontWeight.w900,
           ),
