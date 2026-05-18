@@ -1,6 +1,10 @@
 include: package:flutter_lints/flutter.yaml
 
-linter:
-  rules:
-    prefer_const_constructors: true
-    avoid_print: true
+# The game is a single hot-path render/update loop where many
+# const-constructor and similar style lints are noise; keep the
+# analyzer focused on real correctness issues.
+analyzer:
+  errors:
+    prefer_const_constructors: ignore
+    prefer_const_literals_to_create_immutables: ignore
+    prefer_final_fields: ignore

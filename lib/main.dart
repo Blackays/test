@@ -577,7 +577,16 @@ class GameStats {
   static int bestWave = 0;
 }
 
-enum Phase { playing, levelUp, doors, shop, waveCleared, gameOver, victory }
+enum Phase {
+  playing,
+  paused,
+  levelUp,
+  doors,
+  shop,
+  waveCleared,
+  gameOver,
+  victory
+}
 
 /// ---------------------------------------------------------------------------
 /// Game screen
@@ -618,6 +627,7 @@ class _GameScreenState extends State<GameScreen>
   Offset _moveDir = Offset.zero;
   Offset _facing = const Offset(1, 0);
   double _elapsed = 0;
+  double _shake = 0;
   static const double _stickR = 60;
 
   List<Upgrade> _choices = [];
@@ -631,9 +641,10 @@ class _GameScreenState extends State<GameScreen>
   bool get _bossWave => _wave % kWavesPerFloor == 0;
 
   Rect get _abilityRect {
-    return Rect.fromLTWH(
-        _size.width - 98, _size.height - 108, 78, 78);
+    return Rect.fromLTWH(_size.width - 98, _size.height - 108, 78, 78);
   }
+
+  Rect get _pauseRect => Rect.fromLTWH(_size.width - 56, 66, 42, 42);
 
   @override
   void initState() {
@@ -660,6 +671,7 @@ class _GameScreenState extends State<GameScreen>
     _wave = 1;
     _waveTime = kWaveTime;
     _spawnTimer = 0;
+    _shake = 0;
     _boonThenNext = false;
     _phase = Phase.playing;
     _ready = true;
@@ -674,6 +686,10 @@ class _GameScreenState extends State<GameScreen>
     _last = elapsed;
     if (dt > 1 / 30) dt = 1 / 30;
     _elapsed += dt;
+    if (_shake > 0) {
+      _shake -= dt * 26;
+      if (_shake < 0) _shake = 0;
+    }
     if (_phase == Phase.playing) _update(dt);
     setState(() {});
   }
@@ -826,6 +842,7 @@ class _GameScreenState extends State<GameScreen>
     }
     _enemies.removeWhere((e) {
       if (e.hp <= 0) {
+        if (e.kind == 3) _shake = max(_shake, 11.0);
         _orbs.add(Orb(e.pos));
         _p.obols += e.bounty;
         _p.mp = (_p.mp + 0.8).clamp(0, _p.maxMp).toDouble();
@@ -862,6 +879,7 @@ class _GameScreenState extends State<GameScreen>
     if (_p.invuln > 0) return;
     _p.hp -= dmg;
     _p.hurtFlash = 0.25;
+    _shake = max(_shake, 7.0);
     if (_p.hp <= 0) {
       _p.hp = 0;
       _gameOver();
@@ -928,6 +946,7 @@ class _GameScreenState extends State<GameScreen>
       case HeroClass.tank:
         {
           _bursts.add(Burst(_p.pos, 150));
+          _shake = max(_shake, 9.0);
           for (final e in _enemies) {
             final v = e.pos - _p.pos;
             if (v.distance < 150) {
@@ -958,6 +977,7 @@ class _GameScreenState extends State<GameScreen>
           final tgt = _nearestEnemy(900);
           final at = tgt?.pos ?? _p.pos;
           _bursts.add(Burst(at, 130));
+          _shake = max(_shake, 10.0);
           for (final e in _enemies) {
             if ((e.pos - at).distance < 130) _damageEnemy(e, d * 5, true);
           }
@@ -978,6 +998,7 @@ class _GameScreenState extends State<GameScreen>
           if (tgt != null) _p.pos = tgt.pos;
           _p.invuln = 1.0;
           _bursts.add(Burst(_p.pos, 70));
+          _shake = max(_shake, 8.0);
           for (final e in _enemies) {
             if ((e.pos - _p.pos).distance < 70) _damageEnemy(e, d * 6, true);
           }
@@ -1215,9 +1236,16 @@ class _GameScreenState extends State<GameScreen>
   }
 
   // ---- input ----
+  void _pause() {
+    if (_phase == Phase.playing) setState(() => _phase = Phase.paused);
+  }
+
+  void _resume() => setState(() => _phase = Phase.playing);
+
   void _panStart(DragStartDetails d) {
     if (_phase != Phase.playing) return;
     if (_abilityRect.contains(d.localPosition)) return;
+    if (_pauseRect.contains(d.localPosition)) return;
     _stickOn = true;
     _stickOrigin = d.localPosition;
     _stickKnob = d.localPosition;
@@ -1272,6 +1300,8 @@ class _GameScreenState extends State<GameScreen>
                       time: _elapsed,
                       facing: _facing,
                       moving: _moveDir != Offset.zero,
+                      shake: _shake,
+                      lowHp: _ready && _p.hp / _p.maxHp < 0.3,
                       stickOn: _stickOn,
                       stickOrigin: _stickOrigin,
                       stickKnob: _stickKnob,
@@ -1281,6 +1311,8 @@ class _GameScreenState extends State<GameScreen>
                 ),
                 if (_ready) _hud(),
                 if (_ready && _phase == Phase.playing) _abilityButton(),
+                if (_ready && _phase == Phase.playing) _pauseButton(),
+                if (_phase == Phase.paused) _pauseOverlay(),
                 if (_phase == Phase.levelUp) _levelUpOverlay(),
                 if (_phase == Phase.doors) _doorsOverlay(),
                 if (_phase == Phase.shop) _shopOverlay(),
@@ -1334,6 +1366,63 @@ class _GameScreenState extends State<GameScreen>
         ),
       ),
     );
+  }
+
+  Widget _pauseButton() {
+    return Positioned(
+      left: _pauseRect.left,
+      top: _pauseRect.top,
+      width: _pauseRect.width,
+      height: _pauseRect.height,
+      child: GestureDetector(
+        onTap: _pause,
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xCC24242F),
+            border: Border.all(color: Colors.white24, width: 2),
+          ),
+          alignment: Alignment.center,
+          child: const Icon(Icons.pause, color: Colors.white, size: 22),
+        ),
+      ),
+    );
+  }
+
+  Widget _pauseOverlay() {
+    return _scrim(Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text('PAUSED',
+            style: TextStyle(
+                fontSize: 34,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFFFFD45E))),
+        const SizedBox(height: 6),
+        Text(
+          'F${_floorIdx + 1} ${_floor.name} · wave $_wave · lv ${_p.level}',
+          style: const TextStyle(color: Colors.white60),
+        ),
+        const SizedBox(height: 24),
+        _BigButton(
+            label: 'RESUME', color: const Color(0xFFFFD45E), onTap: _resume),
+        const SizedBox(height: 12),
+        _BigButton(
+          label: 'RESTART',
+          color: const Color(0xFF8CC8FF),
+          onTap: () => setState(_initRun),
+        ),
+        const SizedBox(height: 12),
+        _BigButton(
+          label: 'CHANGE CLASS',
+          color: const Color(0xFF8CC8FF),
+          onTap: () => Navigator.of(context).pushReplacement(
+            MaterialPageRoute<void>(
+                builder: (_) => const CharacterSelectScreen()),
+          ),
+        ),
+      ],
+    ));
   }
 
   Widget _hud() {
@@ -1989,6 +2078,8 @@ class WorldPainter extends CustomPainter {
     required this.time,
     required this.facing,
     required this.moving,
+    required this.shake,
+    required this.lowHp,
     required this.stickOn,
     required this.stickOrigin,
     required this.stickKnob,
@@ -2006,6 +2097,8 @@ class WorldPainter extends CustomPainter {
   final double time;
   final Offset facing;
   final bool moving;
+  final double shake;
+  final bool lowHp;
   final bool stickOn;
   final Offset stickOrigin;
   final Offset stickKnob;
@@ -2057,6 +2150,13 @@ class WorldPainter extends CustomPainter {
           stops: const [0.62, 1.0],
         ).createShader(full),
     );
+
+    // screen shake (entities only; bg/vignette stay put)
+    canvas.save();
+    if (shake > 0) {
+      canvas.translate(
+          sin(time * 97) * shake, cos(time * 89) * shake);
+    }
 
     // bursts (filled fade + expanding ring)
     for (final b in bursts) {
@@ -2273,6 +2373,24 @@ class WorldPainter extends CustomPainter {
 
       draw(Colors.black, t.pos.translate(1.4, 1.4));
       draw(t.color, t.pos);
+    }
+
+    canvas.restore();
+
+    if (lowHp) {
+      final a = 0.22 + 0.16 * (0.5 + 0.5 * sin(time * 7));
+      canvas.drawRect(
+        full,
+        Paint()
+          ..shader = RadialGradient(
+            radius: 0.95,
+            colors: [
+              const Color(0x00000000),
+              const Color(0xFFFF2D40).withValues(alpha: a),
+            ],
+            stops: const [0.55, 1.0],
+          ).createShader(full),
+      );
     }
 
     if (stickOn) {
