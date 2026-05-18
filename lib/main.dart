@@ -528,6 +528,7 @@ class Enemy {
   double shootTimer = 1.4;
   double dotTimer = 0;
   double dotDps = 0;
+  double flash = 0;
 }
 
 class Bolt {
@@ -615,6 +616,8 @@ class _GameScreenState extends State<GameScreen>
   Offset _stickOrigin = Offset.zero;
   Offset _stickKnob = Offset.zero;
   Offset _moveDir = Offset.zero;
+  Offset _facing = const Offset(1, 0);
+  double _elapsed = 0;
   static const double _stickR = 60;
 
   List<Upgrade> _choices = [];
@@ -670,6 +673,7 @@ class _GameScreenState extends State<GameScreen>
     var dt = (elapsed - _last).inMicroseconds / 1e6;
     _last = elapsed;
     if (dt > 1 / 30) dt = 1 / 30;
+    _elapsed += dt;
     if (_phase == Phase.playing) _update(dt);
     setState(() {});
   }
@@ -684,6 +688,7 @@ class _GameScreenState extends State<GameScreen>
         next.dx.clamp(_p.radius, w - _p.radius).toDouble(),
         next.dy.clamp(_p.radius + 70, h - _p.radius - 12).toDouble(),
       );
+      _facing = _moveDir;
     }
     if (_p.hurtFlash > 0) _p.hurtFlash -= dt;
     if (_p.invuln > 0) _p.invuln -= dt;
@@ -775,6 +780,7 @@ class _GameScreenState extends State<GameScreen>
       }
 
       if (e.touchTimer > 0) e.touchTimer -= dt;
+      if (e.flash > 0) e.flash -= dt;
       if (d < e.radius + _p.radius && e.touchTimer <= 0) {
         e.touchTimer = 0.7;
         if (_p.thorns > 0) {
@@ -864,6 +870,7 @@ class _GameScreenState extends State<GameScreen>
 
   void _damageEnemy(Enemy e, double dmg, bool crit) {
     e.hp -= dmg;
+    e.flash = 0.1;
     _texts.add(FloatText(
       e.pos.translate(0, -e.radius),
       crit ? '${dmg.toInt()}!' : '${dmg.toInt()}',
@@ -1262,6 +1269,9 @@ class _GameScreenState extends State<GameScreen>
                       bursts: _bursts,
                       texts: _texts,
                       floor: _floor,
+                      time: _elapsed,
+                      facing: _facing,
+                      moving: _moveDir != Offset.zero,
                       stickOn: _stickOn,
                       stickOrigin: _stickOrigin,
                       stickKnob: _stickKnob,
@@ -1763,18 +1773,67 @@ class _BigButton extends StatelessWidget {
 /// ---------------------------------------------------------------------------
 /// Rendering
 /// ---------------------------------------------------------------------------
-void _drawHero(Canvas canvas, Offset c, double r, HeroDef def, int stage) {
-  final body = Paint()..color = def.body;
+Color _lit(Color c, double a) => Color.lerp(c, Colors.white, a)!;
+Color _shd(Color c, double a) => Color.lerp(c, Colors.black, a)!;
+
+void _drawHero(Canvas canvas, Offset base, double r, HeroDef def, int stage,
+    {double t = 0, bool moving = false, Offset look = Offset.zero}) {
+  // ground shadow
+  canvas.drawOval(
+    Rect.fromCenter(
+        center: base.translate(0, r * 1.0),
+        width: r * 1.9,
+        height: r * 0.55),
+    Paint()..color = const Color(0x44000000),
+  );
+
+  // feet (alternate while moving)
+  final fp = Paint()..color = _shd(def.body, 0.5);
+  final s1 = moving ? sin(t * 13) : 0.0;
+  final lift1 = (s1 > 0 ? s1 : 0.0) * r * 0.22;
+  final lift2 = (s1 < 0 ? -s1 : 0.0) * r * 0.22;
+  canvas.drawOval(
+      Rect.fromCenter(
+          center: base.translate(-r * 0.42, r * 0.86 - lift1),
+          width: r * 0.6,
+          height: r * 0.36),
+      fp);
+  canvas.drawOval(
+      Rect.fromCenter(
+          center: base.translate(r * 0.42, r * 0.86 - lift2),
+          width: r * 0.6,
+          height: r * 0.36),
+      fp);
+
+  // body bob
+  final bob = sin(t * (moving ? 9 : 2.4)) * r * (moving ? 0.10 : 0.05);
+  final c = base.translate(0, -bob.abs() * 0.6);
+
   final accent = Paint()..color = def.accent;
-  final dark = Paint()..color = Colors.black;
+  final outline = Paint()
+    ..color = _shd(def.body, 0.5)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = (r * 0.10).clamp(1.4, 4.0).toDouble();
+
+  Paint bodyShader(Offset center, double rad) => Paint()
+    ..shader = RadialGradient(
+      center: const Alignment(-0.4, -0.5),
+      radius: 1.05,
+      colors: [_lit(def.body, 0.4), def.body, _shd(def.body, 0.32)],
+      stops: const [0.0, 0.55, 1.0],
+    ).createShader(Rect.fromCircle(center: center, radius: rad));
 
   if (stage > 0) {
     final mr = r * (0.55 + stage * 0.12);
-    canvas.drawCircle(c.translate(-r * 0.95, r * 0.18), mr, body);
-    canvas.drawCircle(c.translate(r * 0.95, r * 0.18), mr, body);
+    for (final s in [-1.0, 1.0]) {
+      final mc = c.translate(s * r * 0.95, r * 0.18);
+      canvas.drawCircle(mc, mr, bodyShader(mc, mr));
+      canvas.drawCircle(mc, mr, outline);
+    }
   }
 
-  canvas.drawCircle(c, r, body);
+  canvas.drawCircle(c, r, bodyShader(c, r));
+  canvas.drawCircle(c, r, outline);
 
   switch (def.cls) {
     case HeroClass.tank:
@@ -1789,6 +1848,8 @@ void _drawHero(Canvas canvas, Offset c, double r, HeroDef def, int stage) {
         accent,
       );
       canvas.drawCircle(c.translate(r * 1.05, 0), r * 0.55, accent);
+      canvas.drawCircle(
+          c.translate(r * 0.95, -r * 0.15), r * 0.16, Paint()..color = _lit(def.accent, 0.5));
       break;
     case HeroClass.archer:
       final bow = Path()
@@ -1800,32 +1861,42 @@ void _drawHero(Canvas canvas, Offset c, double r, HeroDef def, int stage) {
           Paint()
             ..color = def.accent
             ..style = PaintingStyle.stroke
-            ..strokeWidth = r * 0.18);
+            ..strokeWidth = r * 0.18
+            ..strokeCap = StrokeCap.round);
       _ears(canvas, c, r, accent);
       break;
     case HeroClass.mage:
       final hat = Path()
         ..moveTo(c.dx - r * 0.85, c.dy - r * 0.7)
-        ..lineTo(c.dx, c.dy - r * 2.0)
+        ..lineTo(c.dx + r * 0.12, c.dy - r * 2.05)
         ..lineTo(c.dx + r * 0.85, c.dy - r * 0.7)
         ..close();
       canvas.drawPath(hat, accent);
-      canvas.drawCircle(c.translate(0, -r * 2.0), r * 0.15,
+      canvas.drawPath(
+          hat,
+          Paint()
+            ..color = _shd(def.accent, 0.4)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = r * 0.06);
+      final glow = 0.5 + 0.5 * sin(t * 4);
+      canvas.drawCircle(c.translate(r * 0.12, -r * 2.05), r * 0.16,
           Paint()..color = const Color(0xFFFFE066));
+      canvas.drawCircle(
+          c.translate(r * 0.12, -r * 2.05),
+          r * 0.28,
+          Paint()
+            ..color = const Color(0xFFFFE066)
+                .withValues(alpha: 0.35 * glow));
       break;
     case HeroClass.warlock:
-      final hornL = Path()
-        ..moveTo(c.dx - r * 0.6, c.dy - r * 0.8)
-        ..lineTo(c.dx - r * 1.0, c.dy - r * 1.8)
-        ..lineTo(c.dx - r * 0.2, c.dy - r * 1.0)
-        ..close();
-      final hornR = Path()
-        ..moveTo(c.dx + r * 0.6, c.dy - r * 0.8)
-        ..lineTo(c.dx + r * 1.0, c.dy - r * 1.8)
-        ..lineTo(c.dx + r * 0.2, c.dy - r * 1.0)
-        ..close();
-      canvas.drawPath(hornL, accent);
-      canvas.drawPath(hornR, accent);
+      for (final s in [-1.0, 1.0]) {
+        final horn = Path()
+          ..moveTo(c.dx + s * r * 0.6, c.dy - r * 0.8)
+          ..lineTo(c.dx + s * r * 1.0, c.dy - r * 1.85)
+          ..lineTo(c.dx + s * r * 0.2, c.dy - r * 1.0)
+          ..close();
+        canvas.drawPath(horn, accent);
+      }
       break;
     case HeroClass.assassin:
       canvas.drawRect(
@@ -1848,17 +1919,37 @@ void _drawHero(Canvas canvas, Offset c, double r, HeroDef def, int stage) {
         ),
         accent,
       );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+              center: c.translate(0, -r * 1.18),
+              width: r * 1.0,
+              height: r * 0.4),
+          Radius.circular(r * 0.1),
+        ),
+        Paint()..color = _lit(def.accent, 0.3),
+      );
       _ears(canvas, c, r, accent);
       break;
   }
 
+  // eyes
+  final lx = look.dx.clamp(-1.0, 1.0).toDouble() * r * 0.09;
+  final ly = look.dy.clamp(-1.0, 1.0).toDouble() * r * 0.07;
   if (def.cls != HeroClass.assassin) {
-    canvas.drawCircle(c.translate(-r * 0.32, -r * 0.16), r * 0.13, dark);
-    canvas.drawCircle(c.translate(r * 0.32, -r * 0.16), r * 0.13, dark);
+    for (final s in [-1.0, 1.0]) {
+      final ec = c.translate(s * r * 0.32, -r * 0.14);
+      canvas.drawCircle(ec, r * 0.2, Paint()..color = Colors.white);
+      canvas.drawCircle(ec.translate(lx, ly), r * 0.1,
+          Paint()..color = Colors.black);
+      canvas.drawCircle(ec.translate(-r * 0.05, -r * 0.05), r * 0.04,
+          Paint()..color = Colors.white);
+    }
   } else {
-    final ep = Paint()..color = def.accent;
-    canvas.drawCircle(c.translate(-r * 0.32, -r * 0.16), r * 0.1, ep);
-    canvas.drawCircle(c.translate(r * 0.32, -r * 0.16), r * 0.1, ep);
+    final ep = Paint()..color = const Color(0xFFE0436B);
+    for (final s in [-1.0, 1.0]) {
+      canvas.drawCircle(c.translate(s * r * 0.32, -r * 0.16), r * 0.1, ep);
+    }
   }
 }
 
@@ -1895,6 +1986,9 @@ class WorldPainter extends CustomPainter {
     required this.bursts,
     required this.texts,
     required this.floor,
+    required this.time,
+    required this.facing,
+    required this.moving,
     required this.stickOn,
     required this.stickOrigin,
     required this.stickKnob,
@@ -1909,6 +2003,9 @@ class WorldPainter extends CustomPainter {
   final List<Burst> bursts;
   final List<FloatText> texts;
   final FloorDef floor;
+  final double time;
+  final Offset facing;
+  final bool moving;
   final bool stickOn;
   final Offset stickOrigin;
   final Offset stickKnob;
@@ -1916,85 +2013,237 @@ class WorldPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = floor.bg);
+    final full = Offset.zero & size;
+    canvas.drawRect(
+      full,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [_lit(floor.bg, 0.05), floor.bg, _shd(floor.bg, 0.28)],
+          stops: const [0.0, 0.5, 1.0],
+        ).createShader(full),
+    );
+
     final grid = Paint()
-      ..color = floor.grid
+      ..color = floor.grid.withValues(alpha: 0.5)
       ..strokeWidth = 1;
-    for (double x = 0; x < size.width; x += 44) {
+    for (double x = 0; x < size.width; x += 46) {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
     }
-    for (double y = 0; y < size.height; y += 44) {
+    for (double y = 0; y < size.height; y += 46) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
     }
     if (!ready) return;
 
+    // ambient drifting particles
+    final w = size.width, h = size.height;
+    final pp = Paint()..color = _lit(floor.grid, 0.3).withValues(alpha: 0.3);
+    for (var i = 0; i < 26; i++) {
+      final px = (i * 6311 % w.toInt()).toDouble();
+      final drift = time * (12 + (i % 5) * 5);
+      var py = (h - (i * 4127 % h.toInt()).toDouble() - drift) % h;
+      if (py < 0) py += h;
+      canvas.drawCircle(Offset(px, py), 1.4 + (i % 3), pp);
+    }
+
+    // vignette
+    canvas.drawRect(
+      full,
+      Paint()
+        ..shader = RadialGradient(
+          radius: 0.95,
+          colors: const [Color(0x00000000), Color(0x80000000)],
+          stops: const [0.62, 1.0],
+        ).createShader(full),
+    );
+
+    // bursts (filled fade + expanding ring)
     for (final b in bursts) {
       final double f = (b.t / 0.35).clamp(0.0, 1.0).toDouble();
+      canvas.drawCircle(b.pos, b.maxR * f,
+          Paint()..color = const Color(0xFFFF9A3C).withValues(alpha: (1 - f) * 0.22));
       canvas.drawCircle(
         b.pos,
         b.maxR * f,
         Paint()
-          ..color = const Color(0xFFFF9A3C).withValues(alpha: (1 - f) * 0.5)
+          ..color = const Color(0xFFFFD45E).withValues(alpha: (1 - f) * 0.7)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 4,
       );
     }
 
-    final orbP = Paint()..color = const Color(0xFF8CFF98);
+    // xp orbs (glow + pulsing core)
     for (final o in orbs) {
-      canvas.drawCircle(o.pos, 5, orbP);
+      final pul = 0.5 + 0.5 * sin(time * 6 + o.pos.dx);
+      canvas.drawCircle(o.pos, 10,
+          Paint()..color = const Color(0xFF8CFF98).withValues(alpha: 0.22));
+      canvas.drawCircle(o.pos, 4 + pul * 1.6,
+          Paint()..color = const Color(0xFFB6FFC0));
     }
 
     for (final e in enemies) {
-      final col = switch (e.kind) {
+      final base = switch (e.kind) {
         1 => const Color(0xFFFF8A4C),
         2 => const Color(0xFF9B5CFF),
         3 => const Color(0xFFFF3B5C),
         4 => const Color(0xFF4CD2C0),
         _ => floor.mob,
       };
-      canvas.drawCircle(e.pos, e.radius, Paint()..color = col);
+      // shadow
+      canvas.drawOval(
+        Rect.fromCenter(
+            center: e.pos.translate(0, e.radius * 0.9),
+            width: e.radius * 1.9,
+            height: e.radius * 0.6),
+        Paint()..color = const Color(0x3C000000),
+      );
+
+      if (e.kind == 3) {
+        final aura = 0.5 + 0.5 * sin(time * 5);
+        canvas.drawCircle(
+            e.pos,
+            e.radius + 6 + aura * 4,
+            Paint()
+              ..color = base.withValues(alpha: 0.25)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 3);
+      }
+      if (e.kind == 4) {
+        canvas.drawCircle(e.pos, e.radius + 5,
+            Paint()..color = base.withValues(alpha: 0.2));
+      }
+
+      final wob = e.kind == 1 ? sin(time * 18 + e.pos.dx) * e.radius * 0.12 : 0.0;
+      canvas.drawCircle(
+        e.pos,
+        e.radius,
+        Paint()
+          ..shader = RadialGradient(
+            center: const Alignment(-0.4, -0.5),
+            colors: [_lit(base, 0.4), base, _shd(base, 0.4)],
+            stops: const [0.0, 0.55, 1.0],
+          ).createShader(
+              Rect.fromCircle(center: e.pos, radius: e.radius + wob)),
+      );
+      canvas.drawCircle(
+          e.pos,
+          e.radius,
+          Paint()
+            ..color = _shd(base, 0.5)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.6);
+
+      if (e.kind == 2) {
+        canvas.drawCircle(e.pos.translate(-e.radius * 0.35, e.radius * 0.2),
+            e.radius * 0.22, Paint()..color = _shd(base, 0.35));
+        canvas.drawCircle(e.pos.translate(e.radius * 0.4, e.radius * 0.05),
+            e.radius * 0.18, Paint()..color = _shd(base, 0.35));
+      }
+      if (e.kind == 3) {
+        final crown = Path()
+          ..moveTo(e.pos.dx - e.radius * 0.7, e.pos.dy - e.radius * 0.85)
+          ..lineTo(e.pos.dx - e.radius * 0.5, e.pos.dy - e.radius * 1.35)
+          ..lineTo(e.pos.dx - e.radius * 0.25, e.pos.dy - e.radius * 0.95)
+          ..lineTo(e.pos.dx, e.pos.dy - e.radius * 1.45)
+          ..lineTo(e.pos.dx + e.radius * 0.25, e.pos.dy - e.radius * 0.95)
+          ..lineTo(e.pos.dx + e.radius * 0.5, e.pos.dy - e.radius * 1.35)
+          ..lineTo(e.pos.dx + e.radius * 0.7, e.pos.dy - e.radius * 0.85)
+          ..close();
+        canvas.drawPath(crown, Paint()..color = const Color(0xFFFFD45E));
+      }
+      if (e.kind == 4) {
+        final dir = (player.pos - e.pos);
+        final dl = dir.distance;
+        if (dl > 0.01) {
+          final n = dir / dl;
+          canvas.drawCircle(e.pos + n * e.radius * 0.9, e.radius * 0.32,
+              Paint()..color = _shd(base, 0.45));
+        }
+      }
+
+      // angry brows + eyes
+      final brow = Paint()
+        ..color = Colors.black
+        ..strokeWidth = e.radius * 0.12
+        ..strokeCap = StrokeCap.round;
+      canvas.drawLine(
+          e.pos.translate(-e.radius * 0.5, -e.radius * 0.32),
+          e.pos.translate(-e.radius * 0.15, -e.radius * 0.16),
+          brow);
+      canvas.drawLine(
+          e.pos.translate(e.radius * 0.5, -e.radius * 0.32),
+          e.pos.translate(e.radius * 0.15, -e.radius * 0.16),
+          brow);
       final wp = Paint()..color = Colors.white;
-      canvas.drawCircle(e.pos.translate(-e.radius * 0.3, -e.radius * 0.1),
-          e.radius * 0.22, wp);
-      canvas.drawCircle(e.pos.translate(e.radius * 0.3, -e.radius * 0.1),
-          e.radius * 0.22, wp);
-      final pp = Paint()..color = Colors.black;
-      canvas.drawCircle(e.pos.translate(-e.radius * 0.26, -e.radius * 0.05),
-          e.radius * 0.1, pp);
-      canvas.drawCircle(e.pos.translate(e.radius * 0.26, -e.radius * 0.05),
-          e.radius * 0.1, pp);
+      canvas.drawCircle(e.pos.translate(-e.radius * 0.3, -e.radius * 0.02),
+          e.radius * 0.2, wp);
+      canvas.drawCircle(e.pos.translate(e.radius * 0.3, -e.radius * 0.02),
+          e.radius * 0.2, wp);
+      final pup = Paint()..color = Colors.black;
+      canvas.drawCircle(e.pos.translate(-e.radius * 0.26, e.radius * 0.02),
+          e.radius * 0.1, pup);
+      canvas.drawCircle(e.pos.translate(e.radius * 0.26, e.radius * 0.02),
+          e.radius * 0.1, pup);
+
+      if (e.flash > 0) {
+        canvas.drawCircle(
+            e.pos,
+            e.radius,
+            Paint()
+              ..color = Colors.white.withValues(
+                  alpha: (e.flash / 0.1).clamp(0.0, 1.0).toDouble() * 0.7));
+      }
+
       if (e.kind == 2 || e.kind == 3 || e.kind == 4) {
         final bw = e.radius * 2;
-        canvas.drawRect(
-          Rect.fromLTWH(e.pos.dx - e.radius, e.pos.dy - e.radius - 8, bw, 4),
+        final by = e.pos.dy - e.radius - 9;
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+              Rect.fromLTWH(e.pos.dx - e.radius, by, bw, 4),
+              const Radius.circular(2)),
           Paint()..color = Colors.black54,
         );
-        canvas.drawRect(
-          Rect.fromLTWH(e.pos.dx - e.radius, e.pos.dy - e.radius - 8,
-              bw * (e.hp / e.maxHp).clamp(0, 1), 4),
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+              Rect.fromLTWH(e.pos.dx - e.radius, by,
+                  bw * (e.hp / e.maxHp).clamp(0, 1).toDouble(), 4),
+              const Radius.circular(2)),
           Paint()..color = const Color(0xFF8CFF98),
         );
       }
     }
 
     for (final b in bolts) {
+      final col = b.crit
+          ? const Color(0xFFFFE066)
+          : (b.splash > 0 ? const Color(0xFFFF9A3C) : Colors.white);
+      final cr = b.splash > 0 ? 7.0 : (b.crit ? 6.0 : 4.0);
       canvas.drawCircle(
-        b.pos,
-        b.splash > 0 ? 7 : (b.crit ? 6 : 4),
-        Paint()..color = b.crit ? const Color(0xFFFFE066) : Colors.white,
-      );
+          b.pos, cr + 4, Paint()..color = col.withValues(alpha: 0.3));
+      canvas.drawCircle(b.pos, cr, Paint()..color = col);
     }
     for (final e in ebolts) {
-      canvas.drawCircle(e.pos, 5, Paint()..color = const Color(0xFFFF4D5E));
+      canvas.drawCircle(e.pos, 9,
+          Paint()..color = const Color(0xFFFF4D5E).withValues(alpha: 0.3));
+      canvas.drawCircle(e.pos, 4.5, Paint()..color = const Color(0xFFFF6B79));
     }
 
     if (player.invuln > 0) {
       canvas.drawCircle(
           player.pos,
-          player.radius + 8,
+          player.radius + 9,
           Paint()
             ..color = const Color(0x668CC8FF)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3);
+    }
+    if (player.frenzy > 0) {
+      canvas.drawCircle(
+          player.pos,
+          player.radius + 6 + sin(time * 16).abs() * 3,
+          Paint()
+            ..color = const Color(0x66FFD45E)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 3);
     }
@@ -2002,37 +2251,33 @@ class WorldPainter extends CustomPainter {
       canvas.drawCircle(player.pos, player.radius + 6,
           Paint()..color = const Color(0x55FF5C6C));
     }
-    if (player.frenzy > 0) {
-      canvas.drawCircle(
-          player.pos,
-          player.radius + 5,
-          Paint()
-            ..color = const Color(0x66FFD45E)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 3);
-    }
-    _drawHero(canvas, player.pos, player.radius, player.def,
-        player.buffStage);
+    _drawHero(canvas, player.pos, player.radius, player.def, player.buffStage,
+        t: time, moving: moving, look: facing);
 
     for (final t in texts) {
-      final tp = TextPainter(
-        text: TextSpan(
-          text: t.text,
-          style: TextStyle(
-            color:
-                t.color.withValues(alpha: t.life.clamp(0.0, 1.0).toDouble()),
-            fontSize: 14,
-            fontWeight: FontWeight.w900,
+      final a = t.life.clamp(0.0, 1.0).toDouble();
+      void draw(Color col, Offset at) {
+        final tp = TextPainter(
+          text: TextSpan(
+            text: t.text,
+            style: TextStyle(
+              color: col.withValues(alpha: a),
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+            ),
           ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(canvas, t.pos - Offset(tp.width / 2, tp.height / 2));
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, at - Offset(tp.width / 2, tp.height / 2));
+      }
+
+      draw(Colors.black, t.pos.translate(1.4, 1.4));
+      draw(t.color, t.pos);
     }
 
     if (stickOn) {
       canvas.drawCircle(stickOrigin, 60,
-          Paint()..color = Colors.white.withValues(alpha: 0.08));
+          Paint()..color = Colors.white.withValues(alpha: 0.07));
       canvas.drawCircle(
           stickOrigin,
           60,
@@ -2041,7 +2286,14 @@ class WorldPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2);
       canvas.drawCircle(stickKnob, 26,
-          Paint()..color = Colors.white.withValues(alpha: 0.35));
+          Paint()..color = Colors.white.withValues(alpha: 0.3));
+      canvas.drawCircle(
+          stickKnob,
+          26,
+          Paint()
+            ..color = Colors.white54
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2);
     }
   }
 
