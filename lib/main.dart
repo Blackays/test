@@ -28,14 +28,15 @@ class BuffBattleApp extends StatelessWidget {
 }
 
 /// ---------------------------------------------------------------------------
-/// Characters
+/// Classes
 /// ---------------------------------------------------------------------------
-enum Hero { dog, cat }
+enum HeroClass { tank, archer, mage, warlock, assassin, gunner }
 
 class HeroDef {
   const HeroDef({
-    required this.hero,
+    required this.cls,
     required this.name,
+    required this.role,
     required this.tagline,
     required this.body,
     required this.accent,
@@ -43,10 +44,20 @@ class HeroDef {
     required this.speed,
     required this.damage,
     required this.fireInterval,
+    required this.projSpeed,
+    required this.range,
+    this.critChance = 0.05,
+    this.projectiles = 1,
+    this.lifesteal = 0,
+    this.splash = 0,
+    this.pierce = 0,
+    this.dot = 0,
+    this.thorns = 0,
   });
 
-  final Hero hero;
+  final HeroClass cls;
   final String name;
+  final String role;
   final String tagline;
   final Color body;
   final Color accent;
@@ -54,31 +65,186 @@ class HeroDef {
   final double speed;
   final double damage;
   final double fireInterval;
+  final double projSpeed;
+  final double range;
+  final double critChance;
+  final int projectiles;
+  final double lifesteal;
+  final double splash;
+  final int pierce;
+  final double dot;
+  final double thorns;
 }
 
-const HeroDef kDog = HeroDef(
-  hero: Hero.dog,
-  name: 'CHEEMS',
-  tagline: 'Much fast. Very bonk. Wow.',
-  body: Color(0xFFE8C39E),
-  accent: Color(0xFF7A4B25),
-  maxHp: 6,
-  speed: 168,
-  damage: 1.0,
-  fireInterval: 0.46,
-);
+const List<HeroDef> kHeroes = [
+  HeroDef(
+    cls: HeroClass.tank,
+    name: 'CHONK KNIGHT',
+    role: 'TANK',
+    tagline: 'Unkillable lump of beef. Touch = ouch.',
+    body: Color(0xFF8C93A3),
+    accent: Color(0xFF4A4F5E),
+    maxHp: 18,
+    speed: 118,
+    damage: 1.5,
+    fireInterval: 0.70,
+    projSpeed: 300,
+    range: 240,
+    critChance: 0.03,
+    thorns: 1.5,
+  ),
+  HeroDef(
+    cls: HeroClass.archer,
+    name: 'BOW DOGE',
+    role: 'ARCHER',
+    tagline: 'Arrows go fast. Arrows go through.',
+    body: Color(0xFF6FCF7B),
+    accent: Color(0xFF2E6B36),
+    maxHp: 6,
+    speed: 166,
+    damage: 1.2,
+    fireInterval: 0.38,
+    projSpeed: 470,
+    range: 360,
+    critChance: 0.10,
+    pierce: 1,
+  ),
+  HeroDef(
+    cls: HeroClass.mage,
+    name: 'WIZARD CAT',
+    role: 'MAGE',
+    tagline: 'Big slow bonk. Big boom.',
+    body: Color(0xFF8C6CFF),
+    accent: Color(0xFF3E2E80),
+    maxHp: 6,
+    speed: 138,
+    damage: 2.4,
+    fireInterval: 0.88,
+    projSpeed: 300,
+    range: 320,
+    splash: 48,
+  ),
+  HeroDef(
+    cls: HeroClass.warlock,
+    name: 'DOOM PUG',
+    role: 'WARLOCK',
+    tagline: 'They rot. You heal. Wow.',
+    body: Color(0xFFB05CCB),
+    accent: Color(0xFF4F2358),
+    maxHp: 7,
+    speed: 146,
+    damage: 0.9,
+    fireInterval: 0.50,
+    projSpeed: 340,
+    range: 300,
+    dot: 2.5,
+    lifesteal: 0.3,
+  ),
+  HeroDef(
+    cls: HeroClass.assassin,
+    name: 'NINJA SHIBA',
+    role: 'ASSASSIN',
+    tagline: 'Blink and you are dead. So fast.',
+    body: Color(0xFF44485A),
+    accent: Color(0xFFE0436B),
+    maxHp: 5,
+    speed: 204,
+    damage: 1.6,
+    fireInterval: 0.30,
+    projSpeed: 480,
+    range: 220,
+    critChance: 0.25,
+  ),
+  HeroDef(
+    cls: HeroClass.gunner,
+    name: 'GANGSTA RAT',
+    role: 'GUNNER',
+    tagline: 'Brrrrt. Many small bonk.',
+    body: Color(0xFFD9A24A),
+    accent: Color(0xFF7A521C),
+    maxHp: 7,
+    speed: 150,
+    damage: 0.8,
+    fireInterval: 0.16,
+    projSpeed: 520,
+    range: 300,
+  ),
+];
 
-const HeroDef kCat = HeroDef(
-  hero: Hero.cat,
-  name: 'BUFF CAT',
-  tagline: 'Tanky. Grumpy. Unbothered.',
-  body: Color(0xFF9AA0AD),
-  accent: Color(0xFF3C4250),
-  maxHp: 10,
-  speed: 138,
-  damage: 1.5,
-  fireInterval: 0.62,
-);
+/// ---------------------------------------------------------------------------
+/// Floors
+/// ---------------------------------------------------------------------------
+class FloorDef {
+  const FloorDef({
+    required this.name,
+    required this.bg,
+    required this.grid,
+    required this.mob,
+    required this.hpMul,
+    required this.spdMul,
+    required this.dmgMul,
+  });
+
+  final String name;
+  final Color bg;
+  final Color grid;
+  final Color mob;
+  final double hpMul;
+  final double spdMul;
+  final double dmgMul;
+}
+
+const List<FloorDef> kFloors = [
+  FloorDef(
+    name: 'THE BACKYARD',
+    bg: Color(0xFF15231A),
+    grid: Color(0xFF254033),
+    mob: Color(0xFF7BC96F),
+    hpMul: 1.0,
+    spdMul: 1.0,
+    dmgMul: 1.0,
+  ),
+  FloorDef(
+    name: 'SEWER OF SHAME',
+    bg: Color(0xFF11201F),
+    grid: Color(0xFF1E3A38),
+    mob: Color(0xFF49C3B0),
+    hpMul: 1.5,
+    spdMul: 1.08,
+    dmgMul: 1.2,
+  ),
+  FloorDef(
+    name: 'DANK CAVES',
+    bg: Color(0xFF1F1726),
+    grid: Color(0xFF3A2A47),
+    mob: Color(0xFFB05CCB),
+    hpMul: 2.2,
+    spdMul: 1.16,
+    dmgMul: 1.45,
+  ),
+  FloorDef(
+    name: 'MEME FACTORY',
+    bg: Color(0xFF26201A),
+    grid: Color(0xFF453826),
+    mob: Color(0xFFE0A046),
+    hpMul: 3.1,
+    spdMul: 1.24,
+    dmgMul: 1.7,
+  ),
+  FloorDef(
+    name: 'THE VOID',
+    bg: Color(0xFF0E0E16),
+    grid: Color(0xFF26263A),
+    mob: Color(0xFFFF5C8A),
+    hpMul: 4.2,
+    spdMul: 1.34,
+    dmgMul: 2.0,
+  ),
+];
+
+const int kWavesPerFloor = 5;
+final int kMaxWaves = kFloors.length * kWavesPerFloor;
+const double kWaveTime = 22;
 
 /// ---------------------------------------------------------------------------
 /// Title screen
@@ -104,8 +270,8 @@ class TitleScreen extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             const Text(
-              'survive the haters · get swole',
-              style: TextStyle(color: Colors.white54, fontSize: 14),
+              'pick a class · clear the floors · get swole',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
             ),
             const SizedBox(height: 40),
             _BigButton(
@@ -120,7 +286,8 @@ class TitleScreen extends StatelessWidget {
             const SizedBox(height: 18),
             if (GameStats.bestWave > 0)
               Text(
-                'best: wave ${GameStats.bestWave}',
+                'best: floor ${((GameStats.bestWave - 1) ~/ kWavesPerFloor) + 1}'
+                ' · wave ${GameStats.bestWave}',
                 style: const TextStyle(color: Colors.white38),
               ),
           ],
@@ -139,22 +306,12 @@ class CharacterSelectScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('CHOOSE YOUR FIGHTER')),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            const SizedBox(height: 8),
-            const Text(
-              'Dog or cat? Pick your champion.',
-              style: TextStyle(color: Colors.white60),
-            ),
-            const SizedBox(height: 24),
-            Expanded(child: _HeroCard(def: kDog)),
-            const SizedBox(height: 16),
-            Expanded(child: _HeroCard(def: kCat)),
-          ],
-        ),
+      appBar: AppBar(title: const Text('CHOOSE YOUR CLASS')),
+      body: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: kHeroes.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (context, i) => _HeroCard(def: kHeroes[i]),
       ),
     );
   }
@@ -167,50 +324,76 @@ class _HeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(18),
       onTap: () => Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => GameScreen(def: def)),
       ),
       child: Container(
         decoration: BoxDecoration(
           color: const Color(0xFF1F1D2E),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(color: def.accent, width: 2),
         ),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Row(
           children: [
             SizedBox(
-              width: 96,
-              height: 96,
-              child: CustomPaint(
-                painter: HeroPreviewPainter(def: def),
-              ),
+              width: 84,
+              height: 84,
+              child: CustomPaint(painter: HeroPreviewPainter(def: def)),
             ),
-            const SizedBox(width: 18),
+            const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    def.name,
-                    style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      color: def.body,
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        def.name,
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          color: def.body,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: def.accent,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          def.role,
+                          style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
                   Text(
                     def.tagline,
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    style:
+                        const TextStyle(color: Colors.white54, fontSize: 11),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Text(
-                    'HP ${def.maxHp.toInt()}   SPD ${def.speed.toInt()}   '
-                    'DMG ${def.damage}   ROF ${(1 / def.fireInterval).toStringAsFixed(1)}/s',
-                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                    'HP ${def.maxHp.toInt()}  SPD ${def.speed.toInt()}  '
+                    'DMG ${def.damage}  ROF '
+                    '${(1 / def.fireInterval).toStringAsFixed(1)}/s',
+                    style:
+                        const TextStyle(color: Colors.white38, fontSize: 10),
+                  ),
+                  Text(
+                    _perk(def),
+                    style: TextStyle(
+                        color: def.body, fontSize: 10, height: 1.4),
                   ),
                 ],
               ),
@@ -220,10 +403,22 @@ class _HeroCard extends StatelessWidget {
       ),
     );
   }
+
+  String _perk(HeroDef d) {
+    final p = <String>[];
+    if (d.thorns > 0) p.add('THORNS ${d.thorns}');
+    if (d.pierce > 0) p.add('PIERCE ${d.pierce}');
+    if (d.splash > 0) p.add('SPLASH');
+    if (d.dot > 0) p.add('POISON');
+    if (d.lifesteal > 0) p.add('LIFESTEAL');
+    if (d.critChance >= 0.2) p.add('HIGH CRIT');
+    if (d.projectiles > 1) p.add('${d.projectiles}x SHOT');
+    return p.isEmpty ? 'BALANCED' : p.join(' · ');
+  }
 }
 
 /// ---------------------------------------------------------------------------
-/// Game entities
+/// Entities
 /// ---------------------------------------------------------------------------
 class Player {
   Player(this.def)
@@ -232,7 +427,16 @@ class Player {
         maxHp = def.maxHp,
         speed = def.speed,
         damage = def.damage,
-        fireInterval = def.fireInterval;
+        fireInterval = def.fireInterval,
+        projSpeed = def.projSpeed,
+        range = def.range,
+        critChance = def.critChance,
+        projectiles = def.projectiles,
+        lifesteal = def.lifesteal,
+        splash = def.splash,
+        pierce = def.pierce,
+        dot = def.dot,
+        thorns = def.thorns;
 
   final HeroDef def;
   Offset pos;
@@ -241,13 +445,17 @@ class Player {
   double speed;
   double damage;
   double fireInterval;
+  double projSpeed;
+  double range;
+  double critChance;
+  int projectiles;
+  double lifesteal;
+  double splash;
+  int pierce;
+  double dot;
+  double thorns;
   double fireTimer = 0;
-  double projSpeed = 360;
-  double range = 320;
-  double critChance = 0.05;
-  int projectiles = 1;
   double regen = 0;
-  double lifesteal = 0;
   double hurtFlash = 0;
 
   int level = 1;
@@ -275,17 +483,33 @@ class Enemy {
   double speed;
   double damage;
   double radius;
-  int kind; // 0 hater, 1 zoomer, 2 chonk, 3 boss
+  int kind; // 0 hater 1 zoomer 2 chonk 3 boss 4 spitter
   double touchTimer = 0;
+  double shootTimer = 1.4;
+  double dotTimer = 0;
+  double dotDps = 0;
 }
 
 class Bolt {
-  Bolt(this.pos, this.vel, this.damage, this.crit);
+  Bolt(this.pos, this.vel, this.damage, this.crit,
+      this.pierce, this.splash, this.dot);
   Offset pos;
   Offset vel;
   double damage;
   bool crit;
-  double life = 1.6;
+  int pierce;
+  double splash;
+  double dot;
+  double life = 1.7;
+  final Set<Enemy> hit = {};
+}
+
+class EBolt {
+  EBolt(this.pos, this.vel, this.damage);
+  Offset pos;
+  Offset vel;
+  double damage;
+  double life = 4;
 }
 
 class Orb {
@@ -310,9 +534,6 @@ enum Phase { playing, levelUp, waveCleared, gameOver, victory }
 /// ---------------------------------------------------------------------------
 /// Game screen
 /// ---------------------------------------------------------------------------
-const int kMaxWaves = 12;
-const double kWaveTime = 20;
-
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key, required this.def});
   final HeroDef def;
@@ -333,6 +554,7 @@ class _GameScreenState extends State<GameScreen>
   late Player _p;
   final List<Enemy> _enemies = [];
   final List<Bolt> _bolts = [];
+  final List<EBolt> _ebolts = [];
   final List<Orb> _orbs = [];
   final List<FloatText> _texts = [];
 
@@ -341,7 +563,6 @@ class _GameScreenState extends State<GameScreen>
   double _waveTime = kWaveTime;
   double _spawnTimer = 0;
 
-  // joystick
   bool _stickOn = false;
   Offset _stickOrigin = Offset.zero;
   Offset _stickKnob = Offset.zero;
@@ -349,6 +570,10 @@ class _GameScreenState extends State<GameScreen>
   static const double _stickR = 60;
 
   List<Upgrade> _choices = [];
+
+  int get _floorIdx =>
+      ((_wave - 1) ~/ kWavesPerFloor).clamp(0, kFloors.length - 1).toInt();
+  FloorDef get _floor => kFloors[_floorIdx];
 
   @override
   void initState() {
@@ -368,6 +593,7 @@ class _GameScreenState extends State<GameScreen>
     _p.pos = Offset(_size.width / 2, _size.height / 2);
     _enemies.clear();
     _bolts.clear();
+    _ebolts.clear();
     _orbs.clear();
     _texts.clear();
     _wave = 1;
@@ -393,7 +619,6 @@ class _GameScreenState extends State<GameScreen>
     final w = _size.width;
     final h = _size.height;
 
-    // movement
     if (_moveDir != Offset.zero) {
       final next = _p.pos + _moveDir * _p.speed * dt;
       _p.pos = Offset(
@@ -406,23 +631,21 @@ class _GameScreenState extends State<GameScreen>
       _p.hp = (_p.hp + _p.regen * dt).clamp(0, _p.maxHp).toDouble();
     }
 
-    // wave timer
     _waveTime -= dt;
     if (_waveTime <= 0) {
       _enemies.clear();
+      _ebolts.clear();
       _phase = Phase.waveCleared;
       return;
     }
 
-    // spawning
     _spawnTimer -= dt;
     if (_spawnTimer <= 0) {
       _spawnEnemy();
-      final base = 1.45 - _wave * 0.07;
-      _spawnTimer = base.clamp(0.32, 1.45).toDouble();
+      final base = 1.45 - _wave * 0.035;
+      _spawnTimer = base.clamp(0.30, 1.45).toDouble();
     }
 
-    // auto fire
     _p.fireTimer -= dt;
     if (_p.fireTimer <= 0) {
       final target = _nearestEnemy();
@@ -432,65 +655,119 @@ class _GameScreenState extends State<GameScreen>
       }
     }
 
-    // bolts
     for (final b in _bolts) {
       b.pos += b.vel * dt;
       b.life -= dt;
     }
     _bolts.removeWhere((b) =>
         b.life <= 0 ||
-        b.pos.dx < -20 ||
-        b.pos.dx > w + 20 ||
-        b.pos.dy < -20 ||
-        b.pos.dy > h + 20);
+        b.pos.dx < -30 ||
+        b.pos.dx > w + 30 ||
+        b.pos.dy < -30 ||
+        b.pos.dy > h + 30);
 
-    // enemies
+    for (final e in _ebolts) {
+      e.pos += e.vel * dt;
+      e.life -= dt;
+      if ((e.pos - _p.pos).distance < _p.radius + 5) {
+        _hurtPlayer(e.damage);
+        e.life = 0;
+        if (_phase != Phase.playing) return;
+      }
+    }
+    _ebolts.removeWhere((e) =>
+        e.life <= 0 ||
+        e.pos.dx < -30 ||
+        e.pos.dx > w + 30 ||
+        e.pos.dy < -30 ||
+        e.pos.dy > h + 30);
+
     for (final e in _enemies) {
       final dir = _p.pos - e.pos;
       final d = dir.distance;
-      if (d > 0.01) e.pos += dir / d * e.speed * dt;
+
+      if (e.kind == 4) {
+        // spitter keeps distance and shoots
+        if (d < 220) {
+          e.pos -= dir / d * e.speed * dt;
+        } else if (d > 300) {
+          e.pos += dir / d * e.speed * dt;
+        }
+        e.shootTimer -= dt;
+        if (e.shootTimer <= 0 && d < 420) {
+          e.shootTimer = 1.7;
+          _ebolts.add(EBolt(e.pos, dir / d * 220, e.damage));
+        }
+      } else if (d > 0.01) {
+        e.pos += dir / d * e.speed * dt;
+      }
+
+      if (e.dotTimer > 0) {
+        e.dotTimer -= dt;
+        e.hp -= e.dotDps * dt;
+      }
+
       if (e.touchTimer > 0) e.touchTimer -= dt;
       if (d < e.radius + _p.radius && e.touchTimer <= 0) {
         e.touchTimer = 0.7;
-        _p.hp -= e.damage;
-        _p.hurtFlash = 0.25;
-        if (_p.hp <= 0) {
-          _p.hp = 0;
-          _gameOver();
-          return;
+        if (_p.thorns > 0) {
+          e.hp -= _p.thorns;
+          _texts.add(FloatText(e.pos.translate(0, -e.radius),
+              '${_p.thorns.toInt()}', const Color(0xFFFFB347)));
         }
+        _hurtPlayer(e.damage);
+        if (_phase != Phase.playing) return;
       }
     }
 
-    // bolt vs enemy
     for (final b in _bolts) {
+      if (b.life <= 0) continue;
       for (final e in _enemies) {
+        if (b.hit.contains(e)) continue;
         if ((b.pos - e.pos).distance < e.radius + 5) {
-          e.hp -= b.damage;
-          _texts.add(FloatText(
-            e.pos.translate(0, -e.radius),
-            b.crit ? '${b.damage.toInt()}!' : '${b.damage.toInt()}',
-            b.crit ? const Color(0xFFFFE066) : Colors.white,
-          ));
-          b.life = 0;
-          if (e.hp <= 0) {
-            _orbs.add(Orb(e.pos));
-            if (_p.lifesteal > 0) {
-              _p.hp = (_p.hp + _p.lifesteal).clamp(0, _p.maxHp).toDouble();
-            }
-            _p.kills++;
+          _damageEnemy(e, b.damage, b.crit);
+          if (b.dot > 0) {
+            e.dotDps = b.dot;
+            e.dotTimer = 2.0;
           }
-          break;
+          if (b.splash > 0) {
+            for (final o in _enemies) {
+              if (o == e) continue;
+              if ((o.pos - b.pos).distance < b.splash) {
+                _damageEnemy(o, b.damage * 0.6, false);
+              }
+            }
+            _texts.add(FloatText(
+                b.pos, 'BOOM', const Color(0xFFFF9A3C)));
+            b.life = 0;
+            break;
+          }
+          b.hit.add(e);
+          if (b.pierce > 0) {
+            b.pierce--;
+          } else {
+            b.life = 0;
+            break;
+          }
         }
       }
     }
-    _enemies.removeWhere((e) => e.hp <= 0);
+    _enemies.removeWhere((e) {
+      if (e.hp <= 0) {
+        _orbs.add(Orb(e.pos));
+        if (_p.lifesteal > 0) {
+          _p.hp = (_p.hp + _p.lifesteal).clamp(0, _p.maxHp).toDouble();
+        }
+        _p.kills++;
+        return true;
+      }
+      return false;
+    });
 
-    // orbs (magnet + collect)
     for (final o in _orbs) {
       final dir = _p.pos - o.pos;
       final d = dir.distance;
-      if (d < 110) o.pos += dir / d * 240 * dt;
+      if (d < 120) o.pos += dir / d * 250 * dt;
     }
     _orbs.removeWhere((o) {
       if ((o.pos - _p.pos).distance < _p.radius + 8) {
@@ -500,12 +777,29 @@ class _GameScreenState extends State<GameScreen>
       return false;
     });
 
-    // floating text
     for (final t in _texts) {
       t.pos = t.pos.translate(0, -34 * dt);
       t.life -= dt;
     }
     _texts.removeWhere((t) => t.life <= 0);
+  }
+
+  void _hurtPlayer(double dmg) {
+    _p.hp -= dmg;
+    _p.hurtFlash = 0.25;
+    if (_p.hp <= 0) {
+      _p.hp = 0;
+      _gameOver();
+    }
+  }
+
+  void _damageEnemy(Enemy e, double dmg, bool crit) {
+    e.hp -= dmg;
+    _texts.add(FloatText(
+      e.pos.translate(0, -e.radius),
+      crit ? '${dmg.toInt()}!' : '${dmg.toInt()}',
+      crit ? const Color(0xFFFFE066) : Colors.white,
+    ));
   }
 
   Enemy? _nearestEnemy() {
@@ -524,10 +818,10 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _fire(Enemy target) {
-    final base = (target.pos - _p.pos);
+    final base = target.pos - _p.pos;
     final baseAng = atan2(base.dy, base.dx);
     final n = _p.projectiles;
-    const spread = 0.18;
+    final spread = n > 1 ? 0.16 : 0.0;
     for (var i = 0; i < n; i++) {
       final off = (i - (n - 1) / 2) * spread;
       final ang = baseAng + off;
@@ -538,6 +832,9 @@ class _GameScreenState extends State<GameScreen>
         Offset(cos(ang), sin(ang)) * _p.projSpeed,
         dmg,
         crit,
+        _p.pierce,
+        _p.splash,
+        _p.dot,
       ));
     }
   }
@@ -545,7 +842,6 @@ class _GameScreenState extends State<GameScreen>
   void _spawnEnemy() {
     final w = _size.width;
     final h = _size.height;
-    // spawn just off a random edge
     Offset p;
     switch (_rng.nextInt(4)) {
       case 0:
@@ -561,43 +857,56 @@ class _GameScreenState extends State<GameScreen>
         p = Offset(w + 24, _rng.nextDouble() * h);
     }
 
-    if (_wave % 5 == 0 && _enemies.where((e) => e.kind == 3).isEmpty) {
+    final f = _floor;
+    final ws = 1 + _wave * 0.05;
+
+    if (_wave % kWavesPerFloor == 0 &&
+        _enemies.where((e) => e.kind == 3).isEmpty) {
       _enemies.add(Enemy(
         pos: p,
-        hp: 24.0 + _wave * 6,
-        speed: 46 + _wave * 1.5,
-        damage: 2,
-        radius: 34,
+        hp: (26 + _wave * 5) * f.hpMul,
+        speed: (44 + _wave * 1.2) * f.spdMul,
+        damage: 2.5 * f.dmgMul,
+        radius: 36,
         kind: 3,
       ));
       return;
     }
 
     final roll = _rng.nextDouble();
-    if (roll < 0.18 + _wave * 0.01) {
+    if (_floorIdx >= 2 && roll < 0.16) {
       _enemies.add(Enemy(
         pos: p,
-        hp: 2.0 + _wave * 0.4,
-        speed: 122 + _wave * 2.0,
-        damage: 1,
+        hp: (6 + _wave * 0.7) * f.hpMul,
+        speed: (70 + _wave * 0.6) * f.spdMul,
+        damage: 1.0 * f.dmgMul,
+        radius: 14,
+        kind: 4,
+      ));
+    } else if (roll < 0.30 + _floorIdx * 0.02) {
+      _enemies.add(Enemy(
+        pos: p,
+        hp: (2 + _wave * 0.35) * f.hpMul * ws,
+        speed: (120 + _wave * 1.6) * f.spdMul,
+        damage: 1.0 * f.dmgMul,
         radius: 11,
         kind: 1,
       ));
-    } else if (roll < 0.32) {
+    } else if (roll < 0.44) {
       _enemies.add(Enemy(
         pos: p,
-        hp: 9.0 + _wave * 1.6,
-        speed: 48 + _wave * 0.8,
-        damage: 2,
-        radius: 22,
+        hp: (9 + _wave * 1.4) * f.hpMul * ws,
+        speed: (46 + _wave * 0.7) * f.spdMul,
+        damage: 2.0 * f.dmgMul,
+        radius: 23,
         kind: 2,
       ));
     } else {
       _enemies.add(Enemy(
         pos: p,
-        hp: 3.0 + _wave * 0.9,
-        speed: 70 + _wave * 1.3,
-        damage: 1,
+        hp: (3 + _wave * 0.8) * f.hpMul * ws,
+        speed: (66 + _wave * 1.1) * f.spdMul,
+        damage: 1.0 * f.dmgMul,
         radius: 15,
         kind: 0,
       ));
@@ -607,31 +916,24 @@ class _GameScreenState extends State<GameScreen>
   void _gainXp() {
     _p.xp++;
     if (_p.xp >= _p.xpToNext) {
-      _p.xp = 0;
+      _p.xp -= _p.xpToNext;
       _p.level++;
       _p.xpToNext = 5 + _p.level * 3;
-      _choices = _rollUpgrades();
+      _choices = (List<Upgrade>.from(kUpgrades)..shuffle(_rng)).take(3).toList();
       _phase = Phase.levelUp;
     }
   }
 
-  List<Upgrade> _rollUpgrades() {
-    final pool = List<Upgrade>.from(kUpgrades)..shuffle(_rng);
-    return pool.take(3).toList();
-  }
-
   void _pickUpgrade(Upgrade u) {
     u.apply(_p);
-    _texts.add(FloatText(
-      _p.pos.translate(0, -_p.radius - 14),
-      u.title,
-      const Color(0xFF8CFF98),
-    ));
+    _texts.add(FloatText(_p.pos.translate(0, -_p.radius - 14), u.title,
+        const Color(0xFF8CFF98)));
     if (_p.xp >= _p.xpToNext) {
       _p.xp -= _p.xpToNext;
       _p.level++;
       _p.xpToNext = 5 + _p.level * 3;
-      _choices = _rollUpgrades();
+      _choices =
+          (List<Upgrade>.from(kUpgrades)..shuffle(_rng)).take(3).toList();
       setState(() => _phase = Phase.levelUp);
     } else {
       setState(() => _phase = Phase.playing);
@@ -657,7 +959,6 @@ class _GameScreenState extends State<GameScreen>
     _phase = Phase.gameOver;
   }
 
-  // input -----------------------------------------------------------------
   void _panStart(DragStartDetails d) {
     if (_phase != Phase.playing) return;
     _stickOn = true;
@@ -706,8 +1007,10 @@ class _GameScreenState extends State<GameScreen>
                       player: _p,
                       enemies: _enemies,
                       bolts: _bolts,
+                      ebolts: _ebolts,
                       orbs: _orbs,
                       texts: _texts,
+                      floor: _floor,
                       stickOn: _stickOn,
                       stickOrigin: _stickOrigin,
                       stickKnob: _stickKnob,
@@ -743,28 +1046,32 @@ class _GameScreenState extends State<GameScreen>
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'WAVE $_wave/$kMaxWaves',
+                    'F${_floorIdx + 1} · ${_floor.name}',
                     style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                      color: Color(0xFFFFD45E),
-                    ),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        color: Color(0xFFFFD45E)),
+                  ),
+                  Text(
+                    'W$_wave/$kMaxWaves',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        color: Colors.white70),
                   ),
                   Text(
                     '⏱ ${_waveTime.ceil()}s',
                     style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                      color: Colors.white,
-                    ),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        color: Colors.white),
                   ),
                   Text(
                     'LV ${_p.level}',
                     style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                      color: Color(0xFF8CC8FF),
-                    ),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        color: Color(0xFF8CC8FF)),
                   ),
                 ],
               ),
@@ -805,10 +1112,9 @@ class _GameScreenState extends State<GameScreen>
         if (label != null)
           Text(label,
               style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              )),
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white)),
       ],
     );
   }
@@ -816,7 +1122,7 @@ class _GameScreenState extends State<GameScreen>
   Widget _scrim(Widget child) {
     return Positioned.fill(
       child: Container(
-        color: Colors.black.withValues(alpha: 0.72),
+        color: Colors.black.withValues(alpha: 0.74),
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -850,10 +1156,11 @@ class _GameScreenState extends State<GameScreen>
   }
 
   Widget _waveClearedOverlay() {
+    final bossCleared = _wave % kWavesPerFloor == 0;
     return _scrim(Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text('WAVE $_wave CLEARED',
+        Text(bossCleared ? 'FLOOR CLEARED' : 'WAVE $_wave CLEARED',
             style: const TextStyle(
                 fontSize: 30,
                 fontWeight: FontWeight.w900,
@@ -861,9 +1168,17 @@ class _GameScreenState extends State<GameScreen>
         const SizedBox(height: 8),
         Text('kills: ${_p.kills}   ·   +25% HP restored',
             style: const TextStyle(color: Colors.white60)),
+        if (bossCleared && _wave < kMaxWaves) ...[
+          const SizedBox(height: 8),
+          Text(
+            'next: ${kFloors[(_floorIdx + 1).clamp(0, kFloors.length - 1).toInt()].name}',
+            style: const TextStyle(
+                color: Color(0xFFFF8A4C), fontWeight: FontWeight.bold),
+          ),
+        ],
         const SizedBox(height: 24),
         _BigButton(
-          label: _wave >= kMaxWaves ? 'FINISH' : 'NEXT WAVE',
+          label: _wave >= kMaxWaves ? 'FINISH' : 'CONTINUE',
           color: const Color(0xFFFFD45E),
           onTap: _nextWave,
         ),
@@ -875,14 +1190,17 @@ class _GameScreenState extends State<GameScreen>
     return _scrim(Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(win ? 'YOU SURVIVED!' : 'GET REKT',
+        Text(win ? 'YOU CLEARED THE VOID!' : 'GET REKT',
+            textAlign: TextAlign.center,
             style: TextStyle(
-                fontSize: 38,
+                fontSize: 34,
                 fontWeight: FontWeight.w900,
-                color: win ? const Color(0xFF8CFF98) : const Color(0xFFFF5C6C))),
+                color:
+                    win ? const Color(0xFF8CFF98) : const Color(0xFFFF5C6C))),
         const SizedBox(height: 10),
         Text(
-          'reached wave $_wave   ·   level ${_p.level}   ·   ${_p.kills} kills',
+          'floor ${_floorIdx + 1} · wave $_wave · '
+          'lv ${_p.level} · ${_p.kills} kills',
           style: const TextStyle(color: Colors.white70),
         ),
         const SizedBox(height: 4),
@@ -896,7 +1214,7 @@ class _GameScreenState extends State<GameScreen>
         ),
         const SizedBox(height: 12),
         _BigButton(
-          label: 'CHANGE FIGHTER',
+          label: 'CHANGE CLASS',
           color: const Color(0xFF8CC8FF),
           onTap: () => Navigator.of(context).pushReplacement(
             MaterialPageRoute<void>(
@@ -927,13 +1245,18 @@ final List<Upgrade> kUpgrades = [
   }),
   Upgrade('WOW CRIT', '+8% crit chance', (p) => p.critChance += 0.08),
   Upgrade('RAPID BONK', '+22% attack speed',
-      (p) => p.fireInterval = (p.fireInterval * 0.78).clamp(0.08, 5).toDouble()),
+      (p) => p.fireInterval = (p.fireInterval * 0.78).clamp(0.06, 5).toDouble()),
   Upgrade('LONG REACH', '+70 range', (p) => p.range += 70),
   Upgrade('FAST BONK', '+90 projectile speed', (p) => p.projSpeed += 90),
   Upgrade('MULTI BONK', '+1 projectile',
-      (p) => p.projectiles = (p.projectiles + 1).clamp(1, 7).toInt()),
+      (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt()),
   Upgrade('VAMPIRE', '+0.4 HP per kill', (p) => p.lifesteal += 0.4),
   Upgrade('REGEN', '+0.6 HP / sec', (p) => p.regen += 0.6),
+  Upgrade('PIERCING', '+1 pierce',
+      (p) => p.pierce = (p.pierce + 1).clamp(0, 8).toInt()),
+  Upgrade('BIG BOOM', '+22 splash radius', (p) => p.splash += 22),
+  Upgrade('PLAGUE', '+1.5 poison dps', (p) => p.dot += 1.5),
+  Upgrade('SPIKES', '+1 thorns damage', (p) => p.thorns += 1),
 ];
 
 class _UpgradeCard extends StatelessWidget {
@@ -1008,63 +1331,108 @@ class _BigButton extends StatelessWidget {
 }
 
 /// ---------------------------------------------------------------------------
-/// Painters
+/// Rendering
 /// ---------------------------------------------------------------------------
 void _drawHero(Canvas canvas, Offset c, double r, HeroDef def, int stage) {
   final body = Paint()..color = def.body;
   final accent = Paint()..color = def.accent;
   final dark = Paint()..color = Colors.black;
-  final white = Paint()..color = Colors.white;
 
-  // muscles grow with stage
   if (stage > 0) {
     final mr = r * (0.55 + stage * 0.12);
-    canvas.drawCircle(c.translate(-r * 0.95, r * 0.15), mr, body);
-    canvas.drawCircle(c.translate(r * 0.95, r * 0.15), mr, body);
+    canvas.drawCircle(c.translate(-r * 0.95, r * 0.18), mr, body);
+    canvas.drawCircle(c.translate(r * 0.95, r * 0.18), mr, body);
   }
 
-  // body
   canvas.drawCircle(c, r, body);
 
-  if (def.hero == Hero.dog) {
-    // ears
-    canvas.drawCircle(c.translate(-r * 0.8, -r * 0.75), r * 0.42, accent);
-    canvas.drawCircle(c.translate(r * 0.8, -r * 0.75), r * 0.42, accent);
-    // snout
-    canvas.drawCircle(c.translate(0, r * 0.25), r * 0.42, white);
-    canvas.drawCircle(c.translate(0, r * 0.1), r * 0.16, dark);
-  } else {
-    // pointy ears
-    final earL = Path()
-      ..moveTo(c.dx - r * 0.95, c.dy - r * 0.55)
-      ..lineTo(c.dx - r * 0.45, c.dy - r * 1.25)
-      ..lineTo(c.dx - r * 0.15, c.dy - r * 0.7)
-      ..close();
-    final earR = Path()
-      ..moveTo(c.dx + r * 0.95, c.dy - r * 0.55)
-      ..lineTo(c.dx + r * 0.45, c.dy - r * 1.25)
-      ..lineTo(c.dx + r * 0.15, c.dy - r * 0.7)
-      ..close();
-    canvas.drawPath(earL, accent);
-    canvas.drawPath(earR, accent);
-    canvas.drawCircle(c.translate(0, r * 0.18), r * 0.1, dark);
-    // whiskers
-    final wp = Paint()
-      ..color = Colors.white70
-      ..strokeWidth = 1.4;
-    canvas.drawLine(c.translate(-r * 0.2, r * 0.2),
-        c.translate(-r * 1.1, r * 0.05), wp);
-    canvas.drawLine(c.translate(-r * 0.2, r * 0.3),
-        c.translate(-r * 1.1, r * 0.4), wp);
-    canvas.drawLine(
-        c.translate(r * 0.2, r * 0.2), c.translate(r * 1.1, r * 0.05), wp);
-    canvas.drawLine(
-        c.translate(r * 0.2, r * 0.3), c.translate(r * 1.1, r * 0.4), wp);
+  switch (def.cls) {
+    case HeroClass.tank:
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+              center: c.translate(0, -r * 1.05), width: r * 1.7, height: r * 0.5),
+          Radius.circular(r * 0.2),
+        ),
+        accent,
+      );
+      canvas.drawCircle(c.translate(r * 1.05, 0), r * 0.55, accent);
+      break;
+    case HeroClass.archer:
+      final bow = Path()
+        ..moveTo(c.dx + r * 1.0, c.dy - r * 0.9)
+        ..quadraticBezierTo(
+            c.dx + r * 1.7, c.dy, c.dx + r * 1.0, c.dy + r * 0.9);
+      canvas.drawPath(
+          bow,
+          Paint()
+            ..color = def.accent
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = r * 0.18);
+      _ears(canvas, c, r, accent);
+      break;
+    case HeroClass.mage:
+      final hat = Path()
+        ..moveTo(c.dx - r * 0.85, c.dy - r * 0.7)
+        ..lineTo(c.dx, c.dy - r * 2.0)
+        ..lineTo(c.dx + r * 0.85, c.dy - r * 0.7)
+        ..close();
+      canvas.drawPath(hat, accent);
+      canvas.drawCircle(c.translate(0, -r * 2.0), r * 0.15,
+          Paint()..color = const Color(0xFFFFE066));
+      break;
+    case HeroClass.warlock:
+      final hornL = Path()
+        ..moveTo(c.dx - r * 0.6, c.dy - r * 0.8)
+        ..lineTo(c.dx - r * 1.0, c.dy - r * 1.8)
+        ..lineTo(c.dx - r * 0.2, c.dy - r * 1.0)
+        ..close();
+      final hornR = Path()
+        ..moveTo(c.dx + r * 0.6, c.dy - r * 0.8)
+        ..lineTo(c.dx + r * 1.0, c.dy - r * 1.8)
+        ..lineTo(c.dx + r * 0.2, c.dy - r * 1.0)
+        ..close();
+      canvas.drawPath(hornL, accent);
+      canvas.drawPath(hornR, accent);
+      break;
+    case HeroClass.assassin:
+      canvas.drawRect(
+        Rect.fromCenter(
+            center: c.translate(0, -r * 0.18),
+            width: r * 2.0,
+            height: r * 0.42),
+        accent,
+      );
+      _ears(canvas, c, r, Paint()..color = def.body);
+      break;
+    case HeroClass.gunner:
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+              center: c.translate(0, -r * 0.95),
+              width: r * 1.8,
+              height: r * 0.55),
+          Radius.circular(r * 0.15),
+        ),
+        accent,
+      );
+      _ears(canvas, c, r, accent);
+      break;
   }
 
-  // eyes
-  canvas.drawCircle(c.translate(-r * 0.32, -r * 0.18), r * 0.13, dark);
-  canvas.drawCircle(c.translate(r * 0.32, -r * 0.18), r * 0.13, dark);
+  if (def.cls != HeroClass.assassin) {
+    canvas.drawCircle(c.translate(-r * 0.32, -r * 0.16), r * 0.13, dark);
+    canvas.drawCircle(c.translate(r * 0.32, -r * 0.16), r * 0.13, dark);
+  } else {
+    final ep = Paint()..color = def.accent;
+    canvas.drawCircle(c.translate(-r * 0.32, -r * 0.16), r * 0.1, ep);
+    canvas.drawCircle(c.translate(r * 0.32, -r * 0.16), r * 0.1, ep);
+  }
+}
+
+void _ears(Canvas canvas, Offset c, double r, Paint p) {
+  canvas.drawCircle(c.translate(-r * 0.78, -r * 0.78), r * 0.34, p);
+  canvas.drawCircle(c.translate(r * 0.78, -r * 0.78), r * 0.34, p);
 }
 
 class HeroPreviewPainter extends CustomPainter {
@@ -1073,7 +1441,8 @@ class HeroPreviewPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    _drawHero(canvas, size.center(Offset.zero), size.width * 0.32, def, 2);
+    _drawHero(canvas, size.center(Offset.zero).translate(0, size.height * 0.12),
+        size.width * 0.26, def, 2);
   }
 
   @override
@@ -1085,8 +1454,10 @@ class WorldPainter extends CustomPainter {
     required this.player,
     required this.enemies,
     required this.bolts,
+    required this.ebolts,
     required this.orbs,
     required this.texts,
+    required this.floor,
     required this.stickOn,
     required this.stickOrigin,
     required this.stickKnob,
@@ -1096,8 +1467,10 @@ class WorldPainter extends CustomPainter {
   final Player player;
   final List<Enemy> enemies;
   final List<Bolt> bolts;
+  final List<EBolt> ebolts;
   final List<Orb> orbs;
   final List<FloatText> texts;
+  final FloorDef floor;
   final bool stickOn;
   final Offset stickOrigin;
   final Offset stickKnob;
@@ -1105,13 +1478,9 @@ class WorldPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // background
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = const Color(0xFF14131F),
-    );
+    canvas.drawRect(Offset.zero & size, Paint()..color = floor.bg);
     final grid = Paint()
-      ..color = Colors.white.withValues(alpha: 0.04)
+      ..color = floor.grid
       ..strokeWidth = 1;
     for (double x = 0; x < size.width; x += 44) {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
@@ -1121,34 +1490,31 @@ class WorldPainter extends CustomPainter {
     }
     if (!ready) return;
 
-    // orbs
     final orbP = Paint()..color = const Color(0xFF8CC8FF);
     for (final o in orbs) {
       canvas.drawCircle(o.pos, 5, orbP);
     }
 
-    // enemies
     for (final e in enemies) {
       final col = switch (e.kind) {
         1 => const Color(0xFFFF8A4C),
         2 => const Color(0xFF9B5CFF),
         3 => const Color(0xFFFF3B5C),
-        _ => const Color(0xFFFF5C6C),
+        4 => const Color(0xFF4CD2C0),
+        _ => floor.mob,
       };
       canvas.drawCircle(e.pos, e.radius, Paint()..color = col);
-      // angry eyes
-      final ep = Paint()..color = Colors.white;
-      canvas.drawCircle(
-          e.pos.translate(-e.radius * 0.3, -e.radius * 0.1), e.radius * 0.22, ep);
-      canvas.drawCircle(
-          e.pos.translate(e.radius * 0.3, -e.radius * 0.1), e.radius * 0.22, ep);
+      final wp = Paint()..color = Colors.white;
+      canvas.drawCircle(e.pos.translate(-e.radius * 0.3, -e.radius * 0.1),
+          e.radius * 0.22, wp);
+      canvas.drawCircle(e.pos.translate(e.radius * 0.3, -e.radius * 0.1),
+          e.radius * 0.22, wp);
       final pp = Paint()..color = Colors.black;
       canvas.drawCircle(e.pos.translate(-e.radius * 0.26, -e.radius * 0.05),
           e.radius * 0.1, pp);
       canvas.drawCircle(e.pos.translate(e.radius * 0.26, -e.radius * 0.05),
           e.radius * 0.1, pp);
-      // hp bar for tough ones
-      if (e.kind == 2 || e.kind == 3) {
+      if (e.kind == 2 || e.kind == 3 || e.kind == 4) {
         final bw = e.radius * 2;
         canvas.drawRect(
           Rect.fromLTWH(e.pos.dx - e.radius, e.pos.dy - e.radius - 8, bw, 4),
@@ -1162,16 +1528,17 @@ class WorldPainter extends CustomPainter {
       }
     }
 
-    // bolts
     for (final b in bolts) {
       canvas.drawCircle(
         b.pos,
-        b.crit ? 6 : 4,
+        b.splash > 0 ? 7 : (b.crit ? 6 : 4),
         Paint()..color = b.crit ? const Color(0xFFFFE066) : Colors.white,
       );
     }
+    for (final e in ebolts) {
+      canvas.drawCircle(e.pos, 5, Paint()..color = const Color(0xFFFF4D5E));
+    }
 
-    // player
     if (player.hurtFlash > 0) {
       canvas.drawCircle(player.pos, player.radius + 6,
           Paint()..color = const Color(0x55FF5C6C));
@@ -1179,7 +1546,6 @@ class WorldPainter extends CustomPainter {
     _drawHero(canvas, player.pos, player.radius, player.def,
         player.buffStage);
 
-    // floating text
     for (final t in texts) {
       final tp = TextPainter(
         text: TextSpan(
@@ -1195,11 +1561,12 @@ class WorldPainter extends CustomPainter {
       tp.paint(canvas, t.pos - Offset(tp.width / 2, tp.height / 2));
     }
 
-    // joystick
     if (stickOn) {
       canvas.drawCircle(stickOrigin, 60,
           Paint()..color = Colors.white.withValues(alpha: 0.08));
-      canvas.drawCircle(stickOrigin, 60,
+      canvas.drawCircle(
+          stickOrigin,
+          60,
           Paint()
             ..color = Colors.white24
             ..style = PaintingStyle.stroke
