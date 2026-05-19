@@ -2,10 +2,13 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations(
+      [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await MetaStore.load();
   runApp(const BuffBattleApp());
 }
@@ -24,7 +27,42 @@ class BuffBattleApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF14131F),
         fontFamily: 'monospace',
       ),
+      builder: (context, child) => _LandscapeGate(child: child!),
       home: const TitleScreen(),
+    );
+  }
+}
+
+/// Browsers can't force device rotation, so on a portrait phone we cover
+/// the app with a "rotate" prompt. Wide screens (desktop) are unaffected.
+class _LandscapeGate extends StatelessWidget {
+  const _LandscapeGate({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final portrait = mq.size.height > mq.size.width;
+    final phone = mq.size.shortestSide < 900;
+    if (!(portrait && phone)) return child;
+    return ColoredBox(
+      color: const Color(0xFF14131F),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          Icon(Icons.screen_rotation,
+              size: 64, color: Color(0xFFFFD45E)),
+          SizedBox(height: 18),
+          Text('ROTATE YOUR DEVICE',
+              style: TextStyle(
+                  color: Color(0xFFFFD45E),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 18)),
+          SizedBox(height: 6),
+          Text('Buff Battle plays in landscape',
+              style: TextStyle(color: Colors.white60, fontSize: 13)),
+        ],
+      ),
     );
   }
 }
