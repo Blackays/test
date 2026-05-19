@@ -431,6 +431,21 @@ class GameMap {
     if (_in(c, r)) tiles[r * cols + c] = v;
   }
 
+  // Force a walkable floor disk (overwrites walls/pools) so the player can
+  // always stand on and reach this world point — used for spawn and doors.
+  void clearDisk(double wx, double wy, double radiusCells) {
+    final cc = (wx / cell).floor();
+    final cr = (wy / cell).floor();
+    final rad = radiusCells.ceil();
+    for (var dr = -rad; dr <= rad; dr++) {
+      for (var dc = -rad; dc <= rad; dc++) {
+        if (dc * dc + dr * dr <= radiusCells * radiusCells) {
+          set(cc + dc, cr + dr, 1);
+        }
+      }
+    }
+  }
+
   int _ttAt(double x, double y) => tt((x / cell).floor(), (y / cell).floor());
   bool walkable(double x, double y) => _ttAt(x, y) == 1;
   bool blocksShot(double x, double y) => _ttAt(x, y) == 0;
@@ -1255,6 +1270,7 @@ class _GameScreenState extends State<GameScreen>
   void _genRoom() {
     _map = GameMap.generate(_rng, _size.width, _size.height, _wave);
     _p.pos = _map.roomCenter(0); // arrive at the entry gate
+    _map.clearDisk(_p.pos.dx, _p.pos.dy, 2.4); // never spawn boxed in
     _enemies.clear();
     _bolts.clear();
     _ebolts.clear();
@@ -2021,6 +2037,10 @@ class _GameScreenState extends State<GameScreen>
         _doors.add(Door(_map.roomCenter(rc - 1 - i), picks[i]));
       }
     }
+    // doors must always be reachable — clear any pool/wall around them
+    for (final d in _doors) {
+      _map.clearDisk(d.pos.dx, d.pos.dy, 2.4);
+    }
     _phase = Phase.roomCleared;
   }
 
@@ -2284,31 +2304,33 @@ class _GameScreenState extends State<GameScreen>
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               for (final dr in _doors)
-                Container(
-                  width: 150,
-                  margin: const EdgeInsets.symmetric(horizontal: 6),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xCC1F1D2E),
-                    borderRadius: BorderRadius.circular(12),
-                    border:
-                        Border.all(color: const Color(0xFFFFD45E), width: 1.5),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(dr.def.icon,
-                          style: const TextStyle(fontSize: 22)),
-                      Text(dr.def.title,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              color: Color(0xFFFFD45E),
-                              fontWeight: FontWeight.w900,
-                              fontSize: 12)),
-                      Text(dr.def.desc,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              color: Colors.white60, fontSize: 10)),
-                    ],
+                Expanded(
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 6),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xCC1F1D2E),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: const Color(0xFFFFD45E), width: 1.5),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(dr.def.icon,
+                            style: const TextStyle(fontSize: 22)),
+                        Text(dr.def.title,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: Color(0xFFFFD45E),
+                                fontWeight: FontWeight.w900,
+                                fontSize: 12)),
+                        Text(dr.def.desc,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: Colors.white60, fontSize: 10)),
+                      ],
+                    ),
                   ),
                 ),
             ],
