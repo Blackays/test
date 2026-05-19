@@ -6,6 +6,9 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'fullscreen_stub.dart'
+    if (dart.library.html) 'fullscreen_web.dart' as platform_fs;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations(
@@ -649,8 +652,11 @@ class _TitleScreenState extends State<TitleScreen> {
             _BigButton(
               label: 'PLAY',
               color: const Color(0xFFFFD45E),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (_) => const CharacterSelectScreen())),
+              onTap: () {
+                platform_fs.enterFullscreen();
+                Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const CharacterSelectScreen()));
+              },
             ),
             const SizedBox(height: 12),
             _BigButton(
