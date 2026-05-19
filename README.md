@@ -48,6 +48,20 @@ Release APK: `flutter build apk --release`.
 Requires the [Flutter SDK](https://docs.flutter.dev/get-started/install)
 (Dart SDK >= 3.6, i.e. Flutter >= 3.27 — uses `Color.withValues`).
 
+## Play in a browser (iPhone-friendly)
+
+CI publishes the Flutter web build to the `gh-pages` branch on every push.
+One-time setup: repo **Settings → Pages → Source: Deploy from a branch →
+Branch: `gh-pages` / `root`**. After the next green run the game is live at:
+
+```
+https://blackays.github.io/test/
+```
+
+Open that in mobile Safari/Chrome and play — touch controls work. (The
+repo/code stays private; only this built page is publicly reachable. If the
+repo is renamed, update `--base-href` in the CI workflow and the URL path.)
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every push: regenerates platforms,
