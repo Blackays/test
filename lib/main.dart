@@ -2,12 +2,14 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-void main() => runApp(const BuffBattleApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await MetaStore.load();
+  runApp(const BuffBattleApp());
+}
 
-/// ---------------------------------------------------------------------------
-/// App shell
-/// ---------------------------------------------------------------------------
 class BuffBattleApp extends StatelessWidget {
   const BuffBattleApp({super.key});
 
@@ -24,6 +26,62 @@ class BuffBattleApp extends StatelessWidget {
       ),
       home: const TitleScreen(),
     );
+  }
+}
+
+/// ---------------------------------------------------------------------------
+/// Meta progression (the "Home" / Mirror) - persisted with SharedPreferences
+/// ---------------------------------------------------------------------------
+class MetaUpgrade {
+  const MetaUpgrade(this.id, this.title, this.desc, this.maxLvl);
+  final String id;
+  final String title;
+  final String desc;
+  final int maxLvl;
+}
+
+const List<MetaUpgrade> kMeta = [
+  MetaUpgrade('hp', 'IRON HIDE', '+2 max HP per level', 6),
+  MetaUpgrade('dmg', 'SHARP CLAWS', '+0.3 damage per level', 6),
+  MetaUpgrade('spd', 'SWIFT PAWS', '+8 move speed per level', 6),
+  MetaUpgrade('gold', 'TRUST FUND', '+15 starting obols per level', 5),
+  MetaUpgrade('vis', 'FAR SIGHT', '+0.10 base view per level', 5),
+];
+
+class MetaStore {
+  static int shards = 0;
+  static final Map<String, int> lvl = {for (final m in kMeta) m.id: 0};
+
+  static int lvlOf(String id) => lvl[id] ?? 0;
+  static int costFor(String id) => 6 + lvlOf(id) * 7;
+
+  static Future<void> load() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      shards = p.getInt('bb_shards') ?? 0;
+      for (final m in kMeta) {
+        lvl[m.id] = p.getInt('bb_lvl_${m.id}') ?? 0;
+      }
+    } catch (_) {/* defaults */}
+  }
+
+  static Future<void> save() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setInt('bb_shards', shards);
+      for (final m in kMeta) {
+        await p.setInt('bb_lvl_${m.id}', lvl[m.id] ?? 0);
+      }
+    } catch (_) {}
+  }
+
+  static bool buy(MetaUpgrade m) {
+    final c = costFor(m.id);
+    if (lvlOf(m.id) >= m.maxLvl || shards < c) return false;
+    shards -= c;
+    lvl[m.id] = lvlOf(m.id) + 1;
+    save();
+    return true;
   }
 }
 
@@ -185,7 +243,7 @@ const List<HeroDef> kHeroes = [
     range: 220,
     critChance: 0.25,
     abilityName: 'SHADOW DASH',
-    abilityDesc: 'Blink to target, burst dmg, brief i-frames',
+    abilityDesc: 'Blink to target, burst dmg, i-frames',
     abilityCost: 5,
     abilityCd: 5,
   ),
@@ -219,6 +277,8 @@ class FloorDef {
     required this.bg,
     required this.grid,
     required this.mob,
+    required this.wall,
+    required this.prop,
     required this.hpMul,
     required this.spdMul,
     required this.dmgMul,
@@ -228,6 +288,8 @@ class FloorDef {
   final Color bg;
   final Color grid;
   final Color mob;
+  final Color wall;
+  final Color prop;
   final double hpMul;
   final double spdMul;
   final double dmgMul;
@@ -239,6 +301,8 @@ const List<FloorDef> kFloors = [
     bg: Color(0xFF15231A),
     grid: Color(0xFF254033),
     mob: Color(0xFF7BC96F),
+    wall: Color(0xFF35543F),
+    prop: Color(0xFF2C4633),
     hpMul: 1.0,
     spdMul: 1.0,
     dmgMul: 1.0,
@@ -248,6 +312,8 @@ const List<FloorDef> kFloors = [
     bg: Color(0xFF11201F),
     grid: Color(0xFF1E3A38),
     mob: Color(0xFF49C3B0),
+    wall: Color(0xFF2C5450),
+    prop: Color(0xFF1C3C39),
     hpMul: 1.5,
     spdMul: 1.08,
     dmgMul: 1.2,
@@ -257,6 +323,8 @@ const List<FloorDef> kFloors = [
     bg: Color(0xFF1F1726),
     grid: Color(0xFF3A2A47),
     mob: Color(0xFFB05CCB),
+    wall: Color(0xFF4A3458),
+    prop: Color(0xFF33243E),
     hpMul: 2.2,
     spdMul: 1.16,
     dmgMul: 1.45,
@@ -266,6 +334,8 @@ const List<FloorDef> kFloors = [
     bg: Color(0xFF26201A),
     grid: Color(0xFF453826),
     mob: Color(0xFFE0A046),
+    wall: Color(0xFF5C4A2C),
+    prop: Color(0xFF40331F),
     hpMul: 3.1,
     spdMul: 1.24,
     dmgMul: 1.7,
@@ -275,6 +345,8 @@ const List<FloorDef> kFloors = [
     bg: Color(0xFF0E0E16),
     grid: Color(0xFF26263A),
     mob: Color(0xFFFF5C8A),
+    wall: Color(0xFF35354F),
+    prop: Color(0xFF20203A),
     hpMul: 4.2,
     spdMul: 1.34,
     dmgMul: 2.0,
@@ -286,11 +358,15 @@ final int kMaxWaves = kFloors.length * kWavesPerFloor;
 const double kWaveTime = 22;
 
 /// ---------------------------------------------------------------------------
-/// Title screen
+/// Title
 /// ---------------------------------------------------------------------------
-class TitleScreen extends StatelessWidget {
+class TitleScreen extends StatefulWidget {
   const TitleScreen({super.key});
+  @override
+  State<TitleScreen> createState() => _TitleScreenState();
+}
 
+class _TitleScreenState extends State<TitleScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -298,39 +374,148 @@ class TitleScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text(
-              'BUFF BATTLE',
-              style: TextStyle(
-                fontSize: 44,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 2,
-                color: Color(0xFFFFD45E),
-              ),
-            ),
+            const Text('BUFF BATTLE',
+                style: TextStyle(
+                    fontSize: 44,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2,
+                    color: Color(0xFFFFD45E))),
             const SizedBox(height: 6),
-            const Text(
-              'pick a class · cast · loot · clear the floors',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
-            ),
-            const SizedBox(height: 40),
+            const Text('pick a class · clear the rooms · get swole',
+                style: TextStyle(color: Colors.white54, fontSize: 13)),
+            const SizedBox(height: 36),
             _BigButton(
               label: 'PLAY',
               color: const Color(0xFFFFD45E),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const CharacterSelectScreen(),
-                ),
-              ),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => const CharacterSelectScreen())),
+            ),
+            const SizedBox(height: 12),
+            _BigButton(
+              label: 'HOME (UPGRADES)',
+              color: const Color(0xFF8CC8FF),
+              onTap: () async {
+                await Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const HomeScreen()));
+                if (mounted) setState(() {});
+              },
             ),
             const SizedBox(height: 18),
+            Text('🔷 ${MetaStore.shards} shards',
+                style: const TextStyle(color: Color(0xFF8CC8FF))),
             if (GameStats.bestWave > 0)
-              Text(
-                'best: floor ${((GameStats.bestWave - 1) ~/ kWavesPerFloor) + 1}'
-                ' · wave ${GameStats.bestWave}',
-                style: const TextStyle(color: Colors.white38),
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                    'best: floor ${((GameStats.bestWave - 1) ~/ kWavesPerFloor) + 1}'
+                    ' · room ${GameStats.bestWave}',
+                    style: const TextStyle(color: Colors.white38)),
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// ---------------------------------------------------------------------------
+/// Home / Mirror (meta upgrades bought with Shards)
+/// ---------------------------------------------------------------------------
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('HOME · MIRROR OF GAINS')),
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            color: const Color(0xFF1F1D2E),
+            child: Text('🔷 ${MetaStore.shards} shards',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF8CC8FF))),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text(
+                'Earn shards every run. Spend them here for permanent boosts.',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
+          ),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: kMeta.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, i) {
+                final m = kMeta[i];
+                final lv = MetaStore.lvlOf(m.id);
+                final maxed = lv >= m.maxLvl;
+                final cost = MetaStore.costFor(m.id);
+                final afford = MetaStore.shards >= cost;
+                return InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: maxed
+                      ? null
+                      : () {
+                          if (MetaStore.buy(m)) setState(() {});
+                        },
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1F1D2E),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                          color: maxed
+                              ? const Color(0xFF8CFF98)
+                              : (afford
+                                  ? const Color(0xFF8CC8FF)
+                                  : Colors.white24)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(m.title,
+                                  style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      color: Colors.white)),
+                              Text(m.desc,
+                                  style: const TextStyle(
+                                      color: Colors.white54, fontSize: 12)),
+                              const SizedBox(height: 4),
+                              Text('level $lv / ${m.maxLvl}',
+                                  style: const TextStyle(
+                                      color: Color(0xFF8CC8FF), fontSize: 11)),
+                            ],
+                          ),
+                        ),
+                        Text(maxed ? 'MAX' : '🔷$cost',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                color: maxed
+                                    ? const Color(0xFF8CFF98)
+                                    : const Color(0xFF8CC8FF))),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -365,8 +550,7 @@ class _HeroCard extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(18),
       onTap: () => Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => GameScreen(def: def)),
-      ),
+          MaterialPageRoute<void>(builder: (_) => GameScreen(def: def))),
       child: Container(
         decoration: BoxDecoration(
           color: const Color(0xFF1F1D2E),
@@ -390,30 +574,24 @@ class _HeroCard extends StatelessWidget {
                   Row(
                     children: [
                       Flexible(
-                        child: Text(
-                          def.name,
-                          style: TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.w900,
-                            color: def.body,
-                          ),
-                        ),
+                        child: Text(def.name,
+                            style: TextStyle(
+                                fontSize: 19,
+                                fontWeight: FontWeight.w900,
+                                color: def.body)),
                       ),
                       const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 7, vertical: 2),
                         decoration: BoxDecoration(
-                          color: def.accent,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          def.role,
-                          style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w900,
-                              color: Colors.white),
-                        ),
+                            color: def.accent,
+                            borderRadius: BorderRadius.circular(6)),
+                        child: Text(def.role,
+                            style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white)),
                       ),
                     ],
                   ),
@@ -423,17 +601,14 @@ class _HeroCard extends StatelessWidget {
                           color: Colors.white54, fontSize: 11)),
                   const SizedBox(height: 6),
                   Text(
-                    'HP ${def.maxHp.toInt()}  MP ${def.maxMp.toInt()}  '
-                    'DMG ${def.damage}  SPD ${def.speed.toInt()}',
-                    style:
-                        const TextStyle(color: Colors.white38, fontSize: 10),
-                  ),
+                      'HP ${def.maxHp.toInt()}  MP ${def.maxMp.toInt()}  '
+                      'DMG ${def.damage}  SPD ${def.speed.toInt()}',
+                      style: const TextStyle(
+                          color: Colors.white38, fontSize: 10)),
                   const SizedBox(height: 2),
-                  Text(
-                    '✦ ${def.abilityName}: ${def.abilityDesc}',
-                    style: TextStyle(
-                        color: def.body, fontSize: 10, height: 1.3),
-                  ),
+                  Text('✦ ${def.abilityName}: ${def.abilityDesc}',
+                      style: TextStyle(
+                          color: def.body, fontSize: 10, height: 1.3)),
                 ],
               ),
             ),
@@ -450,12 +625,12 @@ class _HeroCard extends StatelessWidget {
 class Player {
   Player(this.def)
       : pos = Offset.zero,
-        hp = def.maxHp,
-        maxHp = def.maxHp,
+        hp = def.maxHp + MetaStore.lvlOf('hp') * 2,
+        maxHp = def.maxHp + MetaStore.lvlOf('hp') * 2,
         mp = def.maxMp,
         maxMp = def.maxMp,
-        speed = def.speed,
-        damage = def.damage,
+        speed = def.speed + MetaStore.lvlOf('spd') * 8,
+        damage = def.damage + MetaStore.lvlOf('dmg') * 0.3,
         fireInterval = def.fireInterval,
         projSpeed = def.projSpeed,
         range = def.range,
@@ -465,7 +640,9 @@ class Player {
         splash = def.splash,
         pierce = def.pierce,
         dot = def.dot,
-        thorns = def.thorns;
+        thorns = def.thorns,
+        obols = MetaStore.lvlOf('gold') * 15,
+        vision = 1.0 + MetaStore.lvlOf('vis') * 0.10;
 
   final HeroDef def;
   Offset pos;
@@ -486,6 +663,8 @@ class Player {
   int pierce;
   double dot;
   double thorns;
+  double vision;
+  int volleys = 1;
 
   double fireTimer = 0;
   double regen = 0;
@@ -493,12 +672,14 @@ class Player {
   double abilityTimer = 0;
   double invuln = 0;
   double frenzy = 0;
+  int volleyLeft = 0;
+  double volleyTimer = 0;
 
   int level = 1;
   int xp = 0;
   int xpToNext = 5;
   int kills = 0;
-  int obols = 0;
+  int obols;
 
   int get buffStage => (level - 1) ~/ 3 < 3 ? (level - 1) ~/ 3 : 3;
   double get radius => 16 + buffStage * 3.0;
@@ -522,7 +703,7 @@ class Enemy {
   double speed;
   double damage;
   double radius;
-  int kind; // 0 hater 1 zoomer 2 chonk 3 boss 4 spitter
+  int kind;
   int bounty;
   double touchTimer = 0;
   double shootTimer = 1.4;
@@ -573,20 +754,29 @@ class FloatText {
   double life = 0.8;
 }
 
+enum DoorKind { reward, boon, shop }
+
+class DoorDef {
+  DoorDef(this.icon, this.title, this.desc, this.kind, this.apply);
+  final String icon;
+  final String title;
+  final String desc;
+  final DoorKind kind;
+  final void Function(Player p) apply;
+}
+
+class Door {
+  Door(this.pos, this.def);
+  final Offset pos;
+  final DoorDef def;
+  double r = 30;
+}
+
 class GameStats {
   static int bestWave = 0;
 }
 
-enum Phase {
-  playing,
-  paused,
-  levelUp,
-  doors,
-  shop,
-  waveCleared,
-  gameOver,
-  victory
-}
+enum Phase { playing, roomCleared, paused, levelUp, shop, gameOver, victory }
 
 /// ---------------------------------------------------------------------------
 /// Game screen
@@ -606,6 +796,7 @@ class _GameScreenState extends State<GameScreen>
   final Random _rng = Random();
 
   Size _size = Size.zero;
+  Size _arena = Size.zero;
   bool _ready = false;
 
   late Player _p;
@@ -615,11 +806,13 @@ class _GameScreenState extends State<GameScreen>
   final List<Orb> _orbs = [];
   final List<Burst> _bursts = [];
   final List<FloatText> _texts = [];
+  final List<Door> _doors = [];
 
   Phase _phase = Phase.playing;
   int _wave = 1;
   double _waveTime = kWaveTime;
   double _spawnTimer = 0;
+  bool _boonThenNext = false;
 
   bool _stickOn = false;
   Offset _stickOrigin = Offset.zero;
@@ -631,20 +824,16 @@ class _GameScreenState extends State<GameScreen>
   static const double _stickR = 60;
 
   List<Upgrade> _choices = [];
-  bool _boonThenNext = false;
   List<ShopItem> _shop = [];
-  List<DoorDef> _doors = [];
 
   int get _floorIdx =>
       ((_wave - 1) ~/ kWavesPerFloor).clamp(0, kFloors.length - 1).toInt();
   FloorDef get _floor => kFloors[_floorIdx];
   bool get _bossWave => _wave % kWavesPerFloor == 0;
 
-  Rect get _abilityRect {
-    return Rect.fromLTWH(_size.width - 98, _size.height - 108, 78, 78);
-  }
-
-  Rect get _pauseRect => Rect.fromLTWH(_size.width - 56, 66, 42, 42);
+  Rect get _abilityRect =>
+      Rect.fromLTWH(_size.width - 98, _size.height - 108, 78, 78);
+  Rect get _pauseRect => Rect.fromLTWH(_size.width - 56, 70, 42, 42);
 
   @override
   void initState() {
@@ -660,14 +849,16 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _initRun() {
+    _arena = Size(_size.width * 1.9, _size.height * 1.9);
     _p = Player(widget.def);
-    _p.pos = Offset(_size.width / 2, _size.height / 2);
+    _p.pos = Offset(_arena.width / 2, _arena.height / 2);
     _enemies.clear();
     _bolts.clear();
     _ebolts.clear();
     _orbs.clear();
     _bursts.clear();
     _texts.clear();
+    _doors.clear();
     _wave = 1;
     _waveTime = kWaveTime;
     _spawnTimer = 0;
@@ -690,19 +881,18 @@ class _GameScreenState extends State<GameScreen>
       _shake -= dt * 26;
       if (_shake < 0) _shake = 0;
     }
-    if (_phase == Phase.playing) _update(dt);
+    if (_phase == Phase.playing || _phase == Phase.roomCleared) _update(dt);
     setState(() {});
   }
 
   void _update(double dt) {
-    final w = _size.width;
-    final h = _size.height;
+    final aw = _arena.width, ah = _arena.height;
 
     if (_moveDir != Offset.zero) {
-      final next = _p.pos + _moveDir * _p.speed * dt;
+      final n = _p.pos + _moveDir * _p.speed * dt;
       _p.pos = Offset(
-        next.dx.clamp(_p.radius, w - _p.radius).toDouble(),
-        next.dy.clamp(_p.radius + 70, h - _p.radius - 12).toDouble(),
+        n.dx.clamp(_p.radius + 8, aw - _p.radius - 8).toDouble(),
+        n.dy.clamp(_p.radius + 8, ah - _p.radius - 8).toDouble(),
       );
       _facing = _moveDir;
     }
@@ -720,27 +910,54 @@ class _GameScreenState extends State<GameScreen>
     }
     _bursts.removeWhere((b) => b.t > 0.35);
 
+    for (final t in _texts) {
+      t.pos = t.pos.translate(0, -34 * dt);
+      t.life -= dt;
+    }
+    _texts.removeWhere((t) => t.life <= 0);
+
+    // Between rooms: just walk to a door.
+    if (_phase == Phase.roomCleared) {
+      for (final d in _doors) {
+        if ((d.pos - _p.pos).distance < _p.radius + d.r) {
+          _enterDoor(d);
+          break;
+        }
+      }
+      return;
+    }
+
     _waveTime -= dt;
     if (_waveTime <= 0) {
-      _enemies.clear();
-      _ebolts.clear();
-      _onWaveCleared();
+      _roomEnd();
       return;
     }
 
     _spawnTimer -= dt;
     if (_spawnTimer <= 0) {
       _spawnEnemy();
-      final base = 1.45 - _wave * 0.035;
-      _spawnTimer = base.clamp(0.30, 1.45).toDouble();
+      _spawnTimer = (1.45 - _wave * 0.035).clamp(0.30, 1.45).toDouble();
     }
 
     _p.fireTimer -= dt;
     if (_p.fireTimer <= 0) {
-      final target = _nearestEnemy(_p.range);
-      if (target != null) {
-        _fireAt((target.pos - _p.pos));
+      final t = _nearestEnemy(_p.range);
+      if (t != null) {
+        _fireAt(t.pos - _p.pos);
         _p.fireTimer = _p.effFire;
+        if (_p.volleys > 1) {
+          _p.volleyLeft = _p.volleys - 1;
+          _p.volleyTimer = 0.10;
+        }
+      }
+    }
+    if (_p.volleyLeft > 0) {
+      _p.volleyTimer -= dt;
+      if (_p.volleyTimer <= 0) {
+        final t = _nearestEnemy(_p.range);
+        if (t != null) _fireAt(t.pos - _p.pos);
+        _p.volleyLeft--;
+        _p.volleyTimer = 0.10;
       }
     }
 
@@ -751,9 +968,9 @@ class _GameScreenState extends State<GameScreen>
     _bolts.removeWhere((b) =>
         b.life <= 0 ||
         b.pos.dx < -30 ||
-        b.pos.dx > w + 30 ||
+        b.pos.dx > aw + 30 ||
         b.pos.dy < -30 ||
-        b.pos.dy > h + 30);
+        b.pos.dy > ah + 30);
 
     for (final e in _ebolts) {
       e.pos += e.vel * dt;
@@ -767,9 +984,9 @@ class _GameScreenState extends State<GameScreen>
     _ebolts.removeWhere((e) =>
         e.life <= 0 ||
         e.pos.dx < -30 ||
-        e.pos.dx > w + 30 ||
+        e.pos.dx > aw + 30 ||
         e.pos.dy < -30 ||
-        e.pos.dy > h + 30);
+        e.pos.dy > ah + 30);
 
     for (final e in _enemies) {
       final dir = _p.pos - e.pos;
@@ -782,7 +999,7 @@ class _GameScreenState extends State<GameScreen>
           e.pos += dir / d * e.speed * dt;
         }
         e.shootTimer -= dt;
-        if (e.shootTimer <= 0 && d < 420 && d > 0.01) {
+        if (e.shootTimer <= 0 && d < 460 && d > 0.01) {
           e.shootTimer = 1.7;
           _ebolts.add(EBolt(e.pos, dir / d * 220, e.damage));
         }
@@ -794,7 +1011,6 @@ class _GameScreenState extends State<GameScreen>
         e.dotTimer -= dt;
         e.hp -= e.dotDps * dt;
       }
-
       if (e.touchTimer > 0) e.touchTimer -= dt;
       if (e.flash > 0) e.flash -= dt;
       if (d < e.radius + _p.radius && e.touchTimer <= 0) {
@@ -858,7 +1074,7 @@ class _GameScreenState extends State<GameScreen>
     for (final o in _orbs) {
       final dir = _p.pos - o.pos;
       final d = dir.distance;
-      if (d < 120 && d > 0.01) o.pos += dir / d * 250 * dt;
+      if (d < 130 && d > 0.01) o.pos += dir / d * 260 * dt;
     }
     _orbs.removeWhere((o) {
       if ((o.pos - _p.pos).distance < _p.radius + 8) {
@@ -867,12 +1083,6 @@ class _GameScreenState extends State<GameScreen>
       }
       return false;
     });
-
-    for (final t in _texts) {
-      t.pos = t.pos.translate(0, -34 * dt);
-      t.life -= dt;
-    }
-    _texts.removeWhere((t) => t.life <= 0);
   }
 
   void _hurtPlayer(double dmg) {
@@ -974,7 +1184,7 @@ class _GameScreenState extends State<GameScreen>
         }
       case HeroClass.mage:
         {
-          final tgt = _nearestEnemy(900);
+          final tgt = _nearestEnemy(2000);
           final at = tgt?.pos ?? _p.pos;
           _bursts.add(Burst(at, 130));
           _shake = max(_shake, 10.0);
@@ -994,7 +1204,7 @@ class _GameScreenState extends State<GameScreen>
         }
       case HeroClass.assassin:
         {
-          final tgt = _nearestEnemy(900);
+          final tgt = _nearestEnemy(2000);
           if (tgt != null) _p.pos = tgt.pos;
           _p.invuln = 1.0;
           _bursts.add(Burst(_p.pos, 70));
@@ -1014,24 +1224,20 @@ class _GameScreenState extends State<GameScreen>
         widget.def.abilityName, const Color(0xFF8CC8FF)));
   }
 
-  void _spawnEnemy() {
-    final w = _size.width;
-    final h = _size.height;
-    Offset p;
-    switch (_rng.nextInt(4)) {
-      case 0:
-        p = Offset(_rng.nextDouble() * w, -24);
-        break;
-      case 1:
-        p = Offset(_rng.nextDouble() * w, h + 24);
-        break;
-      case 2:
-        p = Offset(-24, _rng.nextDouble() * h);
-        break;
-      default:
-        p = Offset(w + 24, _rng.nextDouble() * h);
-    }
+  Offset _spawnPos() {
+    final ang = _rng.nextDouble() * pi * 2;
+    final rad = max(_size.width, _size.height) * 0.62 * _p.vision + 30;
+    final x = (_p.pos.dx + cos(ang) * rad)
+        .clamp(20.0, _arena.width - 20)
+        .toDouble();
+    final y = (_p.pos.dy + sin(ang) * rad)
+        .clamp(20.0, _arena.height - 20)
+        .toDouble();
+    return Offset(x, y);
+  }
 
+  void _spawnEnemy() {
+    final p = _spawnPos();
     final f = _floor;
     final ws = 1 + _wave * 0.05;
 
@@ -1135,46 +1341,104 @@ class _GameScreenState extends State<GameScreen>
       setState(_openBoon);
     } else if (_boonThenNext) {
       _boonThenNext = false;
-      _nextWave();
+      _nextRoom();
     } else {
       setState(() => _phase = Phase.playing);
     }
   }
 
-  void _onWaveCleared() {
+  void _roomEnd() {
+    _enemies.clear();
+    _ebolts.clear();
     _p.obols += 3 + _wave * 2;
     if (_wave >= kMaxWaves) {
-      if (_wave > GameStats.bestWave) GameStats.bestWave = _wave;
-      _phase = Phase.victory;
+      _victory();
       return;
     }
     if (_wave - 1 > GameStats.bestWave) GameStats.bestWave = _wave - 1;
+    _doors.clear();
+    final topY = _p.radius + 70;
     if (_bossWave) {
-      _shop = _rollShop();
-      _phase = Phase.shop;
+      _doors.add(Door(
+        Offset(_arena.width / 2, topY),
+        DoorDef('🛒', "CHARON'S SHOP", 'spend your obols', DoorKind.shop,
+            (_) {}),
+      ));
     } else {
-      _doors = _rollDoors();
-      _phase = Phase.doors;
+      final picks = _rollDoorDefs();
+      _doors.add(Door(Offset(_arena.width * 0.34, topY), picks[0]));
+      _doors.add(Door(Offset(_arena.width * 0.66, topY), picks[1]));
     }
+    _phase = Phase.roomCleared;
   }
 
-  void _nextWave() {
+  List<DoorDef> _rollDoorDefs() {
+    final fi = _floorIdx;
+    final pool = <DoorDef>[
+      DoorDef('💰', 'TREASURE', '+${12 + fi * 8} obols', DoorKind.reward,
+          (p) => p.obols += 12 + fi * 8),
+      DoorDef('❤', 'FOUNTAIN', 'heal 45% + 50% MP', DoorKind.reward, (p) {
+        p.hp = (p.hp + p.maxHp * 0.45).clamp(0, p.maxHp).toDouble();
+        p.mp = (p.mp + p.maxMp * 0.5).clamp(0, p.maxMp).toDouble();
+      }),
+      DoorDef('✦', 'BOON', 'pick a power-up', DoorKind.boon, (_) {}),
+      DoorDef('🗡', 'ARSENAL', '+1 projectile', DoorKind.reward,
+          (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt()),
+      DoorDef('👁', 'WATCHTOWER', '+0.2 view', DoorKind.reward,
+          (p) => p.vision = (p.vision + 0.2).clamp(1.0, 2.6).toDouble()),
+    ]..shuffle(_rng);
+    return pool.take(2).toList();
+  }
+
+  void _enterDoor(Door d) {
+    if (d.def.kind == DoorKind.shop) {
+      _shop = _rollShop();
+      _doors.clear();
+      setState(() => _phase = Phase.shop);
+      return;
+    }
+    if (d.def.kind == DoorKind.boon) {
+      _doors.clear();
+      _boonThenNext = true;
+      setState(_openBoon);
+      return;
+    }
+    d.def.apply(_p);
+    _nextRoom();
+  }
+
+  void _nextRoom() {
     _wave++;
     _waveTime = kWaveTime;
     _spawnTimer = 0;
-    _p.hp = (_p.hp + _p.maxHp * 0.15).clamp(0, _p.maxHp).toDouble();
+    _doors.clear();
+    _p.hp = (_p.hp + _p.maxHp * 0.12).clamp(0, _p.maxHp).toDouble();
+    _p.pos = Offset(_arena.width / 2, _arena.height / 2);
     setState(() => _phase = Phase.playing);
   }
 
   void _gameOver() {
     if (_wave > GameStats.bestWave) GameStats.bestWave = _wave;
+    _awardShards();
     _phase = Phase.gameOver;
   }
 
-  // ---- shop ----
+  void _victory() {
+    if (_wave > GameStats.bestWave) GameStats.bestWave = _wave;
+    _awardShards();
+    _phase = Phase.victory;
+  }
+
+  int _lastGain = 0;
+  void _awardShards() {
+    _lastGain = _wave * 2 + _p.kills ~/ 8 + _floorIdx * 4;
+    MetaStore.shards += _lastGain;
+    MetaStore.save();
+  }
+
   List<ShopItem> _rollShop() {
     final mul = 1 + _floorIdx * 0.6;
-    int price(num base) => (base * mul).round();
+    int price(num b) => (b * mul).round();
     final all = <ShopItem>[
       ShopItem('HEALTH POTION', 'heal 50% max HP', price(8), (p) {
         p.hp = (p.hp + p.maxHp * 0.5).clamp(0, p.maxHp).toDouble();
@@ -1194,7 +1458,7 @@ class _GameScreenState extends State<GameScreen>
       ShopItem('+1 DAMAGE', 'hit harder', price(15), (p) => p.damage += 1),
       ShopItem('+15 SPEED', 'move faster', price(12), (p) => p.speed += 15),
       ShopItem('+15% ATK SPEED', 'shoot faster', price(16),
-          (p) => p.fireInterval = (p.fireInterval * 0.85).toDouble()),
+          (p) => p.fireInterval = p.fireInterval * 0.85),
       ShopItem('+6% CRIT', 'more big hits', price(14),
           (p) => p.critChance += 0.06),
       ShopItem('+0.6 MP REGEN', 'cast more often', price(17),
@@ -1205,50 +1469,23 @@ class _GameScreenState extends State<GameScreen>
     return all.take(6).toList();
   }
 
-  void _buy(ShopItem item) {
-    if (item.sold || _p.obols < item.price) return;
-    _p.obols -= item.price;
-    item.apply(_p);
-    setState(() => item.sold = true);
+  void _buy(ShopItem it) {
+    if (it.sold || _p.obols < it.price) return;
+    _p.obols -= it.price;
+    it.apply(_p);
+    setState(() => it.sold = true);
   }
 
-  // ---- doors (Hades-style reward choice) ----
-  List<DoorDef> _rollDoors() {
-    final pool = <DoorDef>[
-      DoorDef('💰', 'TREASURE', '+${10 + _floorIdx * 8} obols',
-          (p) => p.obols += 10 + _floorIdx * 8),
-      DoorDef('❤', 'FOUNTAIN', 'heal 40% HP + 50% MP', (p) {
-        p.hp = (p.hp + p.maxHp * 0.4).clamp(0, p.maxHp).toDouble();
-        p.mp = (p.mp + p.maxMp * 0.5).clamp(0, p.maxMp).toDouble();
-      }),
-      DoorDef('✦', 'BOON', 'pick a power-up', (_) {}),
-      DoorDef('🗡', 'ARSENAL', '+1 projectile',
-          (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt()),
-      DoorDef('⚡', 'OVERCHARGE', '+0.5 MP regen',
-          (p) => p.mpRegen += 0.5),
-    ]..shuffle(_rng);
-    return pool.take(2).toList();
-  }
-
-  void _pickDoor(DoorDef door) {
-    if (door.title == 'BOON') {
-      _boonThenNext = true;
-      setState(_openBoon);
-      return;
-    }
-    door.apply(_p);
-    _nextWave();
-  }
-
-  // ---- input ----
   void _pause() {
-    if (_phase == Phase.playing) setState(() => _phase = Phase.paused);
+    if (_phase == Phase.playing || _phase == Phase.roomCleared) {
+      setState(() => _phase = Phase.paused);
+    }
   }
 
   void _resume() => setState(() => _phase = Phase.playing);
 
   void _panStart(DragStartDetails d) {
-    if (_phase != Phase.playing) return;
+    if (_phase != Phase.playing && _phase != Phase.roomCleared) return;
     if (_abilityRect.contains(d.localPosition)) return;
     if (_pauseRect.contains(d.localPosition)) return;
     _stickOn = true;
@@ -1285,6 +1522,8 @@ class _GameScreenState extends State<GameScreen>
               });
             }
           }
+          final play =
+              _phase == Phase.playing || _phase == Phase.roomCleared;
           return GestureDetector(
             onPanStart: _panStart,
             onPanUpdate: _panUpdate,
@@ -1301,7 +1540,10 @@ class _GameScreenState extends State<GameScreen>
                       orbs: _orbs,
                       bursts: _bursts,
                       texts: _texts,
+                      doors: _doors,
                       floor: _floor,
+                      floorIdx: _floorIdx,
+                      arena: _arena,
                       time: _elapsed,
                       facing: _facing,
                       moving: _moveDir != Offset.zero,
@@ -1316,10 +1558,10 @@ class _GameScreenState extends State<GameScreen>
                 ),
                 if (_ready) _hud(),
                 if (_ready && _phase == Phase.playing) _abilityButton(),
-                if (_ready && _phase == Phase.playing) _pauseButton(),
+                if (_ready && play) _pauseButton(),
+                if (_phase == Phase.roomCleared) _doorHint(),
                 if (_phase == Phase.paused) _pauseOverlay(),
                 if (_phase == Phase.levelUp) _levelUpOverlay(),
-                if (_phase == Phase.doors) _doorsOverlay(),
                 if (_phase == Phase.shop) _shopOverlay(),
                 if (_phase == Phase.gameOver) _endOverlay(false),
                 if (_phase == Phase.victory) _endOverlay(true),
@@ -1331,9 +1573,24 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
+  Widget _doorHint() {
+    return const Positioned(
+      left: 0,
+      right: 0,
+      bottom: 40,
+      child: Center(
+        child: Text('walk into a door →',
+            style: TextStyle(
+                color: Colors.white70,
+                fontSize: 16,
+                fontWeight: FontWeight.w900)),
+      ),
+    );
+  }
+
   Widget _abilityButton() {
     final ready = _canCast;
-    final cdFrac = (_p.abilityTimer / widget.def.abilityCd).clamp(0.0, 1.0);
+    final cd = _p.abilityTimer;
     return Positioned(
       left: _abilityRect.left,
       top: _abilityRect.top,
@@ -1344,9 +1601,8 @@ class _GameScreenState extends State<GameScreen>
         child: Container(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: ready
-                ? const Color(0xFF2A5BD7)
-                : const Color(0xFF24242F),
+            color:
+                ready ? const Color(0xFF2A5BD7) : const Color(0xFF24242F),
             border: Border.all(
                 color: ready ? const Color(0xFF8CC8FF) : Colors.white24,
                 width: 2),
@@ -1358,8 +1614,8 @@ class _GameScreenState extends State<GameScreen>
               const Text('✦',
                   style: TextStyle(fontSize: 22, color: Colors.white)),
               Text(
-                cdFrac > 0
-                    ? '${(_p.abilityTimer).toStringAsFixed(1)}s'
+                cd > 0
+                    ? '${cd.toStringAsFixed(1)}s'
                     : '${widget.def.abilityCost.toInt()} MP',
                 style: const TextStyle(
                     fontSize: 9,
@@ -1404,26 +1660,23 @@ class _GameScreenState extends State<GameScreen>
                 fontWeight: FontWeight.w900,
                 color: Color(0xFFFFD45E))),
         const SizedBox(height: 6),
-        Text(
-          'F${_floorIdx + 1} ${_floor.name} · wave $_wave · lv ${_p.level}',
-          style: const TextStyle(color: Colors.white60),
-        ),
+        Text('F${_floorIdx + 1} ${_floor.name} · room $_wave · lv ${_p.level}',
+            style: const TextStyle(color: Colors.white60)),
         const SizedBox(height: 24),
         _BigButton(
             label: 'RESUME', color: const Color(0xFFFFD45E), onTap: _resume),
         const SizedBox(height: 12),
         _BigButton(
-          label: 'RESTART',
-          color: const Color(0xFF8CC8FF),
-          onTap: () => setState(_initRun),
-        ),
+            label: 'RESTART',
+            color: const Color(0xFF8CC8FF),
+            onTap: () => setState(_initRun)),
         const SizedBox(height: 12),
         _BigButton(
-          label: 'CHANGE CLASS',
+          label: 'QUIT TO MENU',
           color: const Color(0xFF8CC8FF),
-          onTap: () => Navigator.of(context).pushReplacement(
-            MaterialPageRoute<void>(
-                builder: (_) => const CharacterSelectScreen()),
+          onTap: () => Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute<void>(builder: (_) => const TitleScreen()),
+            (r) => false,
           ),
         ),
       ],
@@ -1445,21 +1698,22 @@ class _GameScreenState extends State<GameScreen>
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Flexible(
-                    child: Text(
-                      'F${_floorIdx + 1} ${_floor.name}',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 12,
-                          color: Color(0xFFFFD45E)),
-                    ),
+                    child: Text('F${_floorIdx + 1} ${_floor.name}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 12,
+                            color: Color(0xFFFFD45E))),
                   ),
-                  Text('W$_wave/$kMaxWaves',
+                  Text('R$_wave/$kMaxWaves',
                       style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 12,
                           color: Colors.white70)),
-                  Text('⏱${_waveTime.ceil()}',
+                  Text(
+                      _phase == Phase.roomCleared
+                          ? 'CLEAR'
+                          : '⏱${_waveTime.ceil()}',
                       style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 12,
@@ -1483,8 +1737,7 @@ class _GameScreenState extends State<GameScreen>
               _bar(_p.mp / _p.maxMp, const Color(0xFF3F8BFF),
                   'MP ${_p.mp.floor()}/${_p.maxMp.toInt()}', h: 12),
               const SizedBox(height: 3),
-              _bar(_p.xp / _p.xpToNext, const Color(0xFF8CFF98), null,
-                  h: 6),
+              _bar(_p.xp / _p.xpToNext, const Color(0xFF8CFF98), null, h: 6),
             ],
           ),
         ),
@@ -1499,17 +1752,14 @@ class _GameScreenState extends State<GameScreen>
         Container(
           height: h,
           decoration: BoxDecoration(
-            color: Colors.black38,
-            borderRadius: BorderRadius.circular(10),
-          ),
+              color: Colors.black38,
+              borderRadius: BorderRadius.circular(10)),
           child: FractionallySizedBox(
             alignment: Alignment.centerLeft,
             widthFactor: v.clamp(0.0, 1.0).toDouble(),
             child: Container(
               decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(10),
-              ),
+                  color: color, borderRadius: BorderRadius.circular(10)),
             ),
           ),
         ),
@@ -1558,71 +1808,17 @@ class _GameScreenState extends State<GameScreen>
     ));
   }
 
-  Widget _doorsOverlay() {
-    return _scrim(Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('WAVE $_wave CLEARED',
-            style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFFFFD45E))),
-        const SizedBox(height: 4),
-        const Text('choose your door', style: TextStyle(color: Colors.white60)),
-        const SizedBox(height: 20),
-        for (final dr in _doors)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: () => _pickDoor(dr),
-              child: Container(
-                width: 320,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 18, vertical: 16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1F1D2E),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                      color: const Color(0xFFFFD45E), width: 1.5),
-                ),
-                child: Row(
-                  children: [
-                    Text(dr.icon, style: const TextStyle(fontSize: 30)),
-                    const SizedBox(width: 16),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(dr.title,
-                            style: const TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFFFFD45E))),
-                        Text(dr.desc,
-                            style: const TextStyle(
-                                color: Colors.white60, fontSize: 12)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-      ],
-    ));
-  }
-
   Widget _shopOverlay() {
     return _scrim(Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Text('CHARON\'S SHOP',
+        const Text("CHARON'S SHOP",
             style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.w900,
                 color: Color(0xFFFFD45E))),
         const SizedBox(height: 2),
-        Text('floor cleared · 💰 ${_p.obols}',
+        Text('💰 ${_p.obols}',
             style: const TextStyle(color: Colors.white60)),
         const SizedBox(height: 16),
         for (final it in _shop)
@@ -1674,10 +1870,9 @@ class _GameScreenState extends State<GameScreen>
           ),
         const SizedBox(height: 6),
         _BigButton(
-          label: _wave >= kMaxWaves ? 'FINISH' : 'LEAVE SHOP',
-          color: const Color(0xFF8CC8FF),
-          onTap: _nextWave,
-        ),
+            label: 'LEAVE SHOP',
+            color: const Color(0xFF8CC8FF),
+            onTap: _nextRoom),
       ],
     ));
   }
@@ -1691,30 +1886,30 @@ class _GameScreenState extends State<GameScreen>
             style: TextStyle(
                 fontSize: 32,
                 fontWeight: FontWeight.w900,
-                color:
-                    win ? const Color(0xFF8CFF98) : const Color(0xFFFF5C6C))),
+                color: win
+                    ? const Color(0xFF8CFF98)
+                    : const Color(0xFFFF5C6C))),
         const SizedBox(height: 10),
         Text(
-          'floor ${_floorIdx + 1} · wave $_wave · '
-          'lv ${_p.level} · ${_p.kills} kills',
-          style: const TextStyle(color: Colors.white70),
-        ),
-        const SizedBox(height: 4),
-        Text('best: wave ${GameStats.bestWave}',
-            style: const TextStyle(color: Colors.white38)),
+            'floor ${_floorIdx + 1} · room $_wave · '
+            'lv ${_p.level} · ${_p.kills} kills',
+            style: const TextStyle(color: Colors.white70)),
+        const SizedBox(height: 6),
+        Text('🔷 +$_lastGain shards  (total ${MetaStore.shards})',
+            style: const TextStyle(
+                color: Color(0xFF8CC8FF), fontWeight: FontWeight.w900)),
         const SizedBox(height: 22),
         _BigButton(
-          label: 'PLAY AGAIN',
-          color: const Color(0xFFFFD45E),
-          onTap: () => setState(_initRun),
-        ),
+            label: 'PLAY AGAIN',
+            color: const Color(0xFFFFD45E),
+            onTap: () => setState(_initRun)),
         const SizedBox(height: 12),
         _BigButton(
-          label: 'CHANGE CLASS',
+          label: 'HOME / MENU',
           color: const Color(0xFF8CC8FF),
-          onTap: () => Navigator.of(context).pushReplacement(
-            MaterialPageRoute<void>(
-                builder: (_) => const CharacterSelectScreen()),
+          onTap: () => Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute<void>(builder: (_) => const TitleScreen()),
+            (r) => false,
           ),
         ),
       ],
@@ -1723,20 +1918,19 @@ class _GameScreenState extends State<GameScreen>
 }
 
 /// ---------------------------------------------------------------------------
-/// Upgrades / Shop / Doors
+/// Upgrades / shop
 /// ---------------------------------------------------------------------------
 class Upgrade {
   const Upgrade(this.title, this.desc, this.tier, this.apply);
   final String title;
   final String desc;
-  final int tier; // 0 common 1 rare 2 epic
+  final int tier;
   final void Function(Player p) apply;
 }
 
 const Color _cCommon = Color(0xFF8CFF98);
 const Color _cRare = Color(0xFF8CC8FF);
 const Color _cEpic = Color(0xFFE0A0FF);
-
 Color _tierColor(int t) => t == 0 ? _cCommon : (t == 1 ? _cRare : _cEpic);
 
 final List<Upgrade> kUpgrades = [
@@ -1760,11 +1954,15 @@ final List<Upgrade> kUpgrades = [
   Upgrade('PLAGUE', '+1.5 poison dps', 1, (p) => p.dot += 1.5),
   Upgrade('SPIKES', '+1 thorns damage', 1, (p) => p.thorns += 1),
   Upgrade('FOCUS', '+0.7 MP regen', 1, (p) => p.mpRegen += 0.7),
+  Upgrade('DOUBLE SHOT', 'fire a 2nd volley', 1,
+      (p) => p.volleys = (p.volleys + 1).clamp(1, 4).toInt()),
   Upgrade('MULTI BONK', '+1 projectile', 2,
       (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt()),
   Upgrade('BIG BOOM', '+24 splash radius', 2, (p) => p.splash += 24),
   Upgrade('PIERCING', '+2 pierce', 2,
       (p) => p.pierce = (p.pierce + 2).clamp(0, 12).toInt()),
+  Upgrade('EAGLE EYE', 'see way more of the room', 2,
+      (p) => p.vision = (p.vision + 0.35).clamp(1.0, 2.8).toDouble()),
 ];
 
 class ShopItem {
@@ -1774,14 +1972,6 @@ class ShopItem {
   final int price;
   final void Function(Player p) apply;
   bool sold = false;
-}
-
-class DoorDef {
-  DoorDef(this.icon, this.title, this.desc, this.apply);
-  final String icon;
-  final String title;
-  final String desc;
-  final void Function(Player p) apply;
 }
 
 class _UpgradeCard extends StatelessWidget {
@@ -1845,20 +2035,15 @@ class _BigButton extends StatelessWidget {
       borderRadius: BorderRadius.circular(14),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 44, vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
         decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Color(0xFF14131F),
-            fontWeight: FontWeight.w900,
-            fontSize: 18,
-            letterSpacing: 1,
-          ),
-        ),
+            color: color, borderRadius: BorderRadius.circular(14)),
+        child: Text(label,
+            style: const TextStyle(
+                color: Color(0xFF14131F),
+                fontWeight: FontWeight.w900,
+                fontSize: 17,
+                letterSpacing: 1)),
       ),
     );
   }
@@ -1872,7 +2057,6 @@ Color _shd(Color c, double a) => Color.lerp(c, Colors.black, a)!;
 
 void _drawHero(Canvas canvas, Offset base, double r, HeroDef def, int stage,
     {double t = 0, bool moving = false, Offset look = Offset.zero}) {
-  // ground shadow
   canvas.drawOval(
     Rect.fromCenter(
         center: base.translate(0, r * 1.0),
@@ -1881,7 +2065,6 @@ void _drawHero(Canvas canvas, Offset base, double r, HeroDef def, int stage,
     Paint()..color = const Color(0x44000000),
   );
 
-  // feet (alternate while moving)
   final fp = Paint()..color = _shd(def.body, 0.5);
   final s1 = moving ? sin(t * 13) : 0.0;
   final lift1 = (s1 > 0 ? s1 : 0.0) * r * 0.22;
@@ -1899,7 +2082,6 @@ void _drawHero(Canvas canvas, Offset base, double r, HeroDef def, int stage,
           height: r * 0.36),
       fp);
 
-  // body bob
   final bob = sin(t * (moving ? 9 : 2.4)) * r * (moving ? 0.10 : 0.05);
   final c = base.translate(0, -bob.abs() * 0.6);
 
@@ -1942,8 +2124,6 @@ void _drawHero(Canvas canvas, Offset base, double r, HeroDef def, int stage,
         accent,
       );
       canvas.drawCircle(c.translate(r * 1.05, 0), r * 0.55, accent);
-      canvas.drawCircle(
-          c.translate(r * 0.95, -r * 0.15), r * 0.16, Paint()..color = _lit(def.accent, 0.5));
       break;
     case HeroClass.archer:
       final bow = Path()
@@ -1966,12 +2146,6 @@ void _drawHero(Canvas canvas, Offset base, double r, HeroDef def, int stage,
         ..lineTo(c.dx + r * 0.85, c.dy - r * 0.7)
         ..close();
       canvas.drawPath(hat, accent);
-      canvas.drawPath(
-          hat,
-          Paint()
-            ..color = _shd(def.accent, 0.4)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = r * 0.06);
       final glow = 0.5 + 0.5 * sin(t * 4);
       canvas.drawCircle(c.translate(r * 0.12, -r * 2.05), r * 0.16,
           Paint()..color = const Color(0xFFFFE066));
@@ -1979,8 +2153,8 @@ void _drawHero(Canvas canvas, Offset base, double r, HeroDef def, int stage,
           c.translate(r * 0.12, -r * 2.05),
           r * 0.28,
           Paint()
-            ..color = const Color(0xFFFFE066)
-                .withValues(alpha: 0.35 * glow));
+            ..color =
+                const Color(0xFFFFE066).withValues(alpha: 0.35 * glow));
       break;
     case HeroClass.warlock:
       for (final s in [-1.0, 1.0]) {
@@ -2013,21 +2187,10 @@ void _drawHero(Canvas canvas, Offset base, double r, HeroDef def, int stage,
         ),
         accent,
       );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(
-              center: c.translate(0, -r * 1.18),
-              width: r * 1.0,
-              height: r * 0.4),
-          Radius.circular(r * 0.1),
-        ),
-        Paint()..color = _lit(def.accent, 0.3),
-      );
       _ears(canvas, c, r, accent);
       break;
   }
 
-  // eyes
   final lx = look.dx.clamp(-1.0, 1.0).toDouble() * r * 0.09;
   final ly = look.dy.clamp(-1.0, 1.0).toDouble() * r * 0.07;
   if (def.cls != HeroClass.assassin) {
@@ -2079,7 +2242,10 @@ class WorldPainter extends CustomPainter {
     required this.orbs,
     required this.bursts,
     required this.texts,
+    required this.doors,
     required this.floor,
+    required this.floorIdx,
+    required this.arena,
     required this.time,
     required this.facing,
     required this.moving,
@@ -2098,7 +2264,10 @@ class WorldPainter extends CustomPainter {
   final List<Orb> orbs;
   final List<Burst> bursts;
   final List<FloatText> texts;
+  final List<Door> doors;
   final FloorDef floor;
+  final int floorIdx;
+  final Size arena;
   final double time;
   final Offset facing;
   final bool moving;
@@ -2111,80 +2280,194 @@ class WorldPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final full = Offset.zero & size;
+    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF09090F));
+    if (!ready || arena == Size.zero) return;
+
+    // ---- camera ----
+    final aw = arena.width, ah = arena.height;
+    final fit = min(size.width / aw, size.height / ah);
+    final z = (1.0 / (player.vision <= 0 ? 1.0 : player.vision))
+        .clamp(fit, 1.25)
+        .toDouble();
+    final hvw = size.width / (2 * z);
+    final hvh = size.height / (2 * z);
+    final cx = aw <= 2 * hvw
+        ? aw / 2
+        : player.pos.dx.clamp(hvw, aw - hvw).toDouble();
+    final cy = ah <= 2 * hvh
+        ? ah / 2
+        : player.pos.dy.clamp(hvh, ah - hvh).toDouble();
+
+    canvas.save();
+    canvas.translate(size.width / 2, size.height / 2);
+    canvas.scale(z);
+    if (shake > 0) {
+      canvas.translate(sin(time * 97) * shake, cos(time * 89) * shake);
+    }
+    canvas.translate(-cx, -cy);
+
+    _paintArena(canvas);
+    _paintWorld(canvas);
+
+    canvas.restore();
+
+    // ---- screen-space overlays ----
+    if (lowHp) {
+      final a = 0.22 + 0.16 * (0.5 + 0.5 * sin(time * 7));
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()
+          ..shader = RadialGradient(
+            radius: 0.95,
+            colors: [
+              const Color(0x00000000),
+              const Color(0xFFFF2D40).withValues(alpha: a),
+            ],
+            stops: const [0.55, 1.0],
+          ).createShader(Offset.zero & size),
+      );
+    }
+
+    _paintMinimap(canvas, size);
+
+    if (stickOn) {
+      canvas.drawCircle(stickOrigin, 60,
+          Paint()..color = Colors.white.withValues(alpha: 0.07));
+      canvas.drawCircle(
+          stickOrigin,
+          60,
+          Paint()
+            ..color = Colors.white24
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2);
+      canvas.drawCircle(stickKnob, 26,
+          Paint()..color = Colors.white.withValues(alpha: 0.3));
+    }
+  }
+
+  void _paintArena(Canvas canvas) {
+    final aw = arena.width, ah = arena.height;
+    final rect = Rect.fromLTWH(0, 0, aw, ah);
     canvas.drawRect(
-      full,
+      rect,
       Paint()
         ..shader = LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [_lit(floor.bg, 0.05), floor.bg, _shd(floor.bg, 0.28)],
           stops: const [0.0, 0.5, 1.0],
-        ).createShader(full),
+        ).createShader(rect),
     );
 
     final grid = Paint()
       ..color = floor.grid.withValues(alpha: 0.5)
       ..strokeWidth = 1;
-    for (double x = 0; x < size.width; x += 46) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
+    for (double x = 0; x < aw; x += 56) {
+      canvas.drawLine(Offset(x, 0), Offset(x, ah), grid);
     }
-    for (double y = 0; y < size.height; y += 46) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
-    }
-    if (!ready) return;
-
-    // ambient drifting particles
-    final w = size.width, h = size.height;
-    final pp = Paint()..color = _lit(floor.grid, 0.3).withValues(alpha: 0.3);
-    for (var i = 0; i < 26; i++) {
-      final px = (i * 6311 % w.toInt()).toDouble();
-      final drift = time * (12 + (i % 5) * 5);
-      var py = (h - (i * 4127 % h.toInt()).toDouble() - drift) % h;
-      if (py < 0) py += h;
-      canvas.drawCircle(Offset(px, py), 1.4 + (i % 3), pp);
+    for (double y = 0; y < ah; y += 56) {
+      canvas.drawLine(Offset(0, y), Offset(aw, y), grid);
     }
 
-    // vignette
+    // floor decorations: columns / bridge
+    final prop = Paint()..color = floor.prop;
+    final propEdge = Paint()
+      ..color = _shd(floor.prop, 0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
+    final cols = <Offset>[
+      Offset(aw * 0.22, ah * 0.24),
+      Offset(aw * 0.78, ah * 0.24),
+      Offset(aw * 0.22, ah * 0.76),
+      Offset(aw * 0.78, ah * 0.76),
+      Offset(aw * 0.5, ah * 0.5),
+      Offset(aw * 0.5, ah * 0.16),
+    ];
+    if (floorIdx == 1 || floorIdx == 4) {
+      // a bridge band across the middle
+      final bridge = Rect.fromLTWH(0, ah * 0.46, aw, ah * 0.08);
+      canvas.drawRect(bridge, Paint()..color = _shd(floor.prop, 0.1));
+      canvas.drawRect(bridge, propEdge);
+    }
+    for (var i = 0; i < cols.length; i++) {
+      final cpos = cols[i];
+      final cr = 26.0 + (i % 3) * 6;
+      canvas.drawCircle(cpos.translate(0, 6),
+          cr, Paint()..color = const Color(0x33000000));
+      canvas.drawCircle(cpos, cr, prop);
+      canvas.drawCircle(cpos, cr, propEdge);
+      canvas.drawCircle(cpos.translate(-cr * 0.3, -cr * 0.3), cr * 0.35,
+          Paint()..color = _lit(floor.prop, 0.18));
+    }
+
+    // border walls
+    final wall = Paint()
+      ..color = floor.wall
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 18;
+    canvas.drawRect(rect.deflate(9), wall);
     canvas.drawRect(
-      full,
-      Paint()
-        ..shader = RadialGradient(
-          radius: 0.95,
-          colors: const [Color(0x00000000), Color(0x80000000)],
-          stops: const [0.62, 1.0],
-        ).createShader(full),
-    );
+        rect.deflate(2),
+        Paint()
+          ..color = _shd(floor.wall, 0.35)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4);
+  }
 
-    // screen shake (entities only; bg/vignette stay put)
-    canvas.save();
-    if (shake > 0) {
-      canvas.translate(
-          sin(time * 97) * shake, cos(time * 89) * shake);
+  void _paintWorld(Canvas canvas) {
+    // doors
+    for (final d in doors) {
+      final pulse = 0.5 + 0.5 * sin(time * 4 + d.pos.dx);
+      canvas.drawCircle(d.pos, d.r + 10,
+          Paint()..color = const Color(0xFFFFD45E).withValues(alpha: 0.18));
+      final arch = RRect.fromRectAndRadius(
+        Rect.fromCenter(
+            center: d.pos, width: d.r * 2, height: d.r * 2.4),
+        Radius.circular(d.r),
+      );
+      canvas.drawRRect(arch, Paint()..color = _shd(floor.bg, 0.4));
+      canvas.drawRRect(
+          arch,
+          Paint()
+            ..color = Color.lerp(const Color(0xFFFFD45E),
+                Colors.white, pulse * 0.4)!
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 4);
+      final tp = TextPainter(
+        text: TextSpan(
+          text: '${d.def.icon}\n${d.def.title}\n${d.def.desc}',
+          style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              height: 1.3,
+              fontWeight: FontWeight.w900),
+        ),
+        textAlign: TextAlign.center,
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 160);
+      tp.paint(canvas,
+          d.pos.translate(-tp.width / 2, -d.r * 1.2 - tp.height - 6));
     }
 
-    // bursts (filled fade + expanding ring)
     for (final b in bursts) {
       final double f = (b.t / 0.35).clamp(0.0, 1.0).toDouble();
       canvas.drawCircle(b.pos, b.maxR * f,
           Paint()..color = const Color(0xFFFF9A3C).withValues(alpha: (1 - f) * 0.22));
       canvas.drawCircle(
-        b.pos,
-        b.maxR * f,
-        Paint()
-          ..color = const Color(0xFFFFD45E).withValues(alpha: (1 - f) * 0.7)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 4,
-      );
+          b.pos,
+          b.maxR * f,
+          Paint()
+            ..color = const Color(0xFFFFD45E).withValues(alpha: (1 - f) * 0.7)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 4);
     }
 
-    // xp orbs (glow + pulsing core)
     for (final o in orbs) {
       final pul = 0.5 + 0.5 * sin(time * 6 + o.pos.dx);
       canvas.drawCircle(o.pos, 10,
           Paint()..color = const Color(0xFF8CFF98).withValues(alpha: 0.22));
-      canvas.drawCircle(o.pos, 4 + pul * 1.6,
-          Paint()..color = const Color(0xFFB6FFC0));
+      canvas.drawCircle(
+          o.pos, 4 + pul * 1.6, Paint()..color = const Color(0xFFB6FFC0));
     }
 
     for (final e in enemies) {
@@ -2195,7 +2478,6 @@ class WorldPainter extends CustomPainter {
         4 => const Color(0xFF4CD2C0),
         _ => floor.mob,
       };
-      // shadow
       canvas.drawOval(
         Rect.fromCenter(
             center: e.pos.translate(0, e.radius * 0.9),
@@ -2203,7 +2485,6 @@ class WorldPainter extends CustomPainter {
             height: e.radius * 0.6),
         Paint()..color = const Color(0x3C000000),
       );
-
       if (e.kind == 3) {
         final aura = 0.5 + 0.5 * sin(time * 5);
         canvas.drawCircle(
@@ -2214,12 +2495,6 @@ class WorldPainter extends CustomPainter {
               ..style = PaintingStyle.stroke
               ..strokeWidth = 3);
       }
-      if (e.kind == 4) {
-        canvas.drawCircle(e.pos, e.radius + 5,
-            Paint()..color = base.withValues(alpha: 0.2));
-      }
-
-      final wob = e.kind == 1 ? sin(time * 18 + e.pos.dx) * e.radius * 0.12 : 0.0;
       canvas.drawCircle(
         e.pos,
         e.radius,
@@ -2228,8 +2503,7 @@ class WorldPainter extends CustomPainter {
             center: const Alignment(-0.4, -0.5),
             colors: [_lit(base, 0.4), base, _shd(base, 0.4)],
             stops: const [0.0, 0.55, 1.0],
-          ).createShader(
-              Rect.fromCircle(center: e.pos, radius: e.radius + wob)),
+          ).createShader(Rect.fromCircle(center: e.pos, radius: e.radius)),
       );
       canvas.drawCircle(
           e.pos,
@@ -2238,13 +2512,6 @@ class WorldPainter extends CustomPainter {
             ..color = _shd(base, 0.5)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.6);
-
-      if (e.kind == 2) {
-        canvas.drawCircle(e.pos.translate(-e.radius * 0.35, e.radius * 0.2),
-            e.radius * 0.22, Paint()..color = _shd(base, 0.35));
-        canvas.drawCircle(e.pos.translate(e.radius * 0.4, e.radius * 0.05),
-            e.radius * 0.18, Paint()..color = _shd(base, 0.35));
-      }
       if (e.kind == 3) {
         final crown = Path()
           ..moveTo(e.pos.dx - e.radius * 0.7, e.pos.dy - e.radius * 0.85)
@@ -2257,29 +2524,14 @@ class WorldPainter extends CustomPainter {
           ..close();
         canvas.drawPath(crown, Paint()..color = const Color(0xFFFFD45E));
       }
-      if (e.kind == 4) {
-        final dir = (player.pos - e.pos);
-        final dl = dir.distance;
-        if (dl > 0.01) {
-          final n = dir / dl;
-          canvas.drawCircle(e.pos + n * e.radius * 0.9, e.radius * 0.32,
-              Paint()..color = _shd(base, 0.45));
-        }
-      }
-
-      // angry brows + eyes
       final brow = Paint()
         ..color = Colors.black
         ..strokeWidth = e.radius * 0.12
         ..strokeCap = StrokeCap.round;
-      canvas.drawLine(
-          e.pos.translate(-e.radius * 0.5, -e.radius * 0.32),
-          e.pos.translate(-e.radius * 0.15, -e.radius * 0.16),
-          brow);
-      canvas.drawLine(
-          e.pos.translate(e.radius * 0.5, -e.radius * 0.32),
-          e.pos.translate(e.radius * 0.15, -e.radius * 0.16),
-          brow);
+      canvas.drawLine(e.pos.translate(-e.radius * 0.5, -e.radius * 0.32),
+          e.pos.translate(-e.radius * 0.15, -e.radius * 0.16), brow);
+      canvas.drawLine(e.pos.translate(e.radius * 0.5, -e.radius * 0.32),
+          e.pos.translate(e.radius * 0.15, -e.radius * 0.16), brow);
       final wp = Paint()..color = Colors.white;
       canvas.drawCircle(e.pos.translate(-e.radius * 0.3, -e.radius * 0.02),
           e.radius * 0.2, wp);
@@ -2290,7 +2542,6 @@ class WorldPainter extends CustomPainter {
           e.radius * 0.1, pup);
       canvas.drawCircle(e.pos.translate(e.radius * 0.26, e.radius * 0.02),
           e.radius * 0.1, pup);
-
       if (e.flash > 0) {
         canvas.drawCircle(
             e.pos,
@@ -2299,24 +2550,22 @@ class WorldPainter extends CustomPainter {
               ..color = Colors.white.withValues(
                   alpha: (e.flash / 0.1).clamp(0.0, 1.0).toDouble() * 0.7));
       }
-
-      if (e.kind == 2 || e.kind == 3 || e.kind == 4) {
-        final bw = e.radius * 2;
-        final by = e.pos.dy - e.radius - 9;
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-              Rect.fromLTWH(e.pos.dx - e.radius, by, bw, 4),
-              const Radius.circular(2)),
-          Paint()..color = Colors.black54,
-        );
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-              Rect.fromLTWH(e.pos.dx - e.radius, by,
-                  bw * (e.hp / e.maxHp).clamp(0, 1).toDouble(), 4),
-              const Radius.circular(2)),
-          Paint()..color = const Color(0xFF8CFF98),
-        );
-      }
+      // HP bar on ALL enemies
+      final bw = e.radius * 2;
+      final by = e.pos.dy - e.radius - 9;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(e.pos.dx - e.radius, by, bw, 4),
+            const Radius.circular(2)),
+        Paint()..color = Colors.black54,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(e.pos.dx - e.radius, by,
+                bw * (e.hp / e.maxHp).clamp(0, 1).toDouble(), 4),
+            const Radius.circular(2)),
+        Paint()..color = const Color(0xFF8CFF98),
+      );
     }
 
     for (final b in bolts) {
@@ -2359,65 +2608,54 @@ class WorldPainter extends CustomPainter {
     _drawHero(canvas, player.pos, player.radius, player.def, player.buffStage,
         t: time, moving: moving, look: facing);
 
-    for (final t in texts) {
-      final a = t.life.clamp(0.0, 1.0).toDouble();
-      void draw(Color col, Offset at) {
+    for (final tx in texts) {
+      final a = tx.life.clamp(0.0, 1.0).toDouble();
+      void d(Color col, Offset at) {
         final tp = TextPainter(
           text: TextSpan(
-            text: t.text,
+            text: tx.text,
             style: TextStyle(
-              color: col.withValues(alpha: a),
-              fontSize: 14,
-              fontWeight: FontWeight.w900,
-            ),
+                color: col.withValues(alpha: a),
+                fontSize: 14,
+                fontWeight: FontWeight.w900),
           ),
           textDirection: TextDirection.ltr,
         )..layout();
         tp.paint(canvas, at - Offset(tp.width / 2, tp.height / 2));
       }
 
-      draw(Colors.black, t.pos.translate(1.4, 1.4));
-      draw(t.color, t.pos);
+      d(Colors.black, tx.pos.translate(1.4, 1.4));
+      d(tx.color, tx.pos);
     }
+  }
 
-    canvas.restore();
-
-    if (lowHp) {
-      final a = 0.22 + 0.16 * (0.5 + 0.5 * sin(time * 7));
-      canvas.drawRect(
-        full,
+  void _paintMinimap(Canvas canvas, Size size) {
+    final mw = 96.0;
+    final mh = mw * (arena.height / arena.width);
+    final ox = 12.0;
+    final oy = size.height - mh - 14;
+    final rect = Rect.fromLTWH(ox, oy, mw, mh);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(6)),
+        Paint()..color = Colors.black.withValues(alpha: 0.45));
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(6)),
         Paint()
-          ..shader = RadialGradient(
-            radius: 0.95,
-            colors: [
-              const Color(0x00000000),
-              const Color(0xFFFF2D40).withValues(alpha: a),
-            ],
-            stops: const [0.55, 1.0],
-          ).createShader(full),
-      );
+          ..color = Colors.white24
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1);
+    Offset map(Offset w) => Offset(
+        ox + w.dx / arena.width * mw, oy + w.dy / arena.height * mh);
+    final ep = Paint()..color = const Color(0xFFFF5C6C);
+    for (final e in enemies) {
+      canvas.drawCircle(map(e.pos), 1.6, ep);
     }
-
-    if (stickOn) {
-      canvas.drawCircle(stickOrigin, 60,
-          Paint()..color = Colors.white.withValues(alpha: 0.07));
-      canvas.drawCircle(
-          stickOrigin,
-          60,
-          Paint()
-            ..color = Colors.white24
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2);
-      canvas.drawCircle(stickKnob, 26,
-          Paint()..color = Colors.white.withValues(alpha: 0.3));
-      canvas.drawCircle(
-          stickKnob,
-          26,
-          Paint()
-            ..color = Colors.white54
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2);
+    final dp = Paint()..color = const Color(0xFFFFD45E);
+    for (final dr in doors) {
+      canvas.drawCircle(map(dr.pos), 3, dp);
     }
+    canvas.drawCircle(
+        map(player.pos), 3, Paint()..color = const Color(0xFF8CFF98));
   }
 
   @override

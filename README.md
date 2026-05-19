@@ -23,15 +23,23 @@ bulks up as it levels.
 - **Move:** touch & drag — a floating joystick appears under your thumb.
 - **Attack:** auto-fires at the nearest enemy (one-handed friendly).
 - **Ability:** MP-gated active per class (bottom-right Cast button).
-- **Boons:** XP level-ups offer 1 of 3 Common/Rare/Epic upgrades.
-- **Doors:** Hades-style reward choice between waves
-  (Treasure / Fountain / Boon / Arsenal / Overcharge).
+- **Rooms & doors:** clear a room, then physically **walk into a door**
+  to choose your next reward (Treasure / Fountain / Boon / Arsenal /
+  Watchtower); boss rooms lead to Charon's shop.
+- **Camera:** the arena is bigger than the screen and the camera
+  follows you; minimap bottom-left. The Epic boon **EAGLE EYE** (and
+  the Watchtower door / FAR SIGHT meta) zoom the view out.
+- **Home (Mirror):** persistent meta-progression. Every run earns
+  Shards; spend them on permanent boosts (HP, damage, speed, starting
+  obols, base view). Saved with `shared_preferences`.
+- **Boons:** XP level-ups offer 1 of 3 Common/Rare/Epic upgrades,
+  including **DOUBLE SHOT** (extra volley) and **EAGLE EYE**.
 - **Charon's shop:** after every floor boss — potions & permanent buffs.
 - **Floors:** Backyard → Sewer → Caves → Factory → Void, each with its
-  own palette and escalating enemy multipliers.
-- Enemies: Hater, Zoomer (fast), Chonk (tank), Spitter (ranged, floor 3+),
-  Boss (every floor end).
-- Pause anytime (top-right), screen shake & low-HP warning for feedback.
+  own palette, **walls/columns/bridges**, and escalating enemy stats.
+- Enemies (all show HP bars): Hater, Zoomer (fast), Chonk (tank),
+  Spitter (ranged, floor 3+), Boss (every floor end).
+- Pause anytime (top-right), screen shake & low-HP warning.
 
 ## Running it
 
