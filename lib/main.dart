@@ -2216,6 +2216,7 @@ class _GameScreenState extends State<GameScreen>
             onPanUpdate: _panUpdate,
             onPanEnd: _panEnd,
             child: Stack(
+              fit: StackFit.expand,
               children: [
                 Positioned.fill(
                   child: CustomPaint(
