@@ -30,7 +30,7 @@ class BuffBattleApp extends StatelessWidget {
 }
 
 /// ---------------------------------------------------------------------------
-/// Meta progression (the "Home" / Mirror) - persisted with SharedPreferences
+/// Meta progression (Home / Mirror) - persisted with SharedPreferences
 /// ---------------------------------------------------------------------------
 class MetaUpgrade {
   const MetaUpgrade(this.id, this.title, this.desc, this.maxLvl);
@@ -62,7 +62,7 @@ class MetaStore {
       for (final m in kMeta) {
         lvl[m.id] = p.getInt('bb_lvl_${m.id}') ?? 0;
       }
-    } catch (_) {/* defaults */}
+    } catch (_) {}
   }
 
   static Future<void> save() async {
@@ -275,9 +275,9 @@ class FloorDef {
   const FloorDef({
     required this.name,
     required this.bg,
+    required this.voidc,
     required this.grid,
     required this.mob,
-    required this.wall,
     required this.prop,
     required this.hpMul,
     required this.spdMul,
@@ -286,9 +286,9 @@ class FloorDef {
 
   final String name;
   final Color bg;
+  final Color voidc;
   final Color grid;
   final Color mob;
-  final Color wall;
   final Color prop;
   final double hpMul;
   final double spdMul;
@@ -298,55 +298,55 @@ class FloorDef {
 const List<FloorDef> kFloors = [
   FloorDef(
     name: 'THE BACKYARD',
-    bg: Color(0xFF15231A),
-    grid: Color(0xFF254033),
+    bg: Color(0xFF1C3325),
+    voidc: Color(0xFF0C1710),
+    grid: Color(0xFF2C4A36),
     mob: Color(0xFF7BC96F),
-    wall: Color(0xFF35543F),
-    prop: Color(0xFF2C4633),
+    prop: Color(0xFF2F5A3C),
     hpMul: 1.0,
     spdMul: 1.0,
     dmgMul: 1.0,
   ),
   FloorDef(
     name: 'SEWER OF SHAME',
-    bg: Color(0xFF11201F),
-    grid: Color(0xFF1E3A38),
+    bg: Color(0xFF173230),
+    voidc: Color(0xFF081413),
+    grid: Color(0xFF255250),
     mob: Color(0xFF49C3B0),
-    wall: Color(0xFF2C5450),
-    prop: Color(0xFF1C3C39),
+    prop: Color(0xFF1F4A47),
     hpMul: 1.5,
     spdMul: 1.08,
     dmgMul: 1.2,
   ),
   FloorDef(
     name: 'DANK CAVES',
-    bg: Color(0xFF1F1726),
-    grid: Color(0xFF3A2A47),
+    bg: Color(0xFF2A2036),
+    voidc: Color(0xFF120D18),
+    grid: Color(0xFF402F50),
     mob: Color(0xFFB05CCB),
-    wall: Color(0xFF4A3458),
-    prop: Color(0xFF33243E),
+    prop: Color(0xFF3C2C4C),
     hpMul: 2.2,
     spdMul: 1.16,
     dmgMul: 1.45,
   ),
   FloorDef(
     name: 'MEME FACTORY',
-    bg: Color(0xFF26201A),
-    grid: Color(0xFF453826),
+    bg: Color(0xFF332A1E),
+    voidc: Color(0xFF17120A),
+    grid: Color(0xFF50432C),
     mob: Color(0xFFE0A046),
-    wall: Color(0xFF5C4A2C),
-    prop: Color(0xFF40331F),
+    prop: Color(0xFF4A3A22),
     hpMul: 3.1,
     spdMul: 1.24,
     dmgMul: 1.7,
   ),
   FloorDef(
     name: 'THE VOID',
-    bg: Color(0xFF0E0E16),
-    grid: Color(0xFF26263A),
+    bg: Color(0xFF18182A),
+    voidc: Color(0xFF08080F),
+    grid: Color(0xFF2E2E48),
     mob: Color(0xFFFF5C8A),
-    wall: Color(0xFF35354F),
-    prop: Color(0xFF20203A),
+    prop: Color(0xFF262640),
     hpMul: 4.2,
     spdMul: 1.34,
     dmgMul: 2.0,
@@ -355,7 +355,85 @@ const List<FloorDef> kFloors = [
 
 const int kWavesPerFloor = 5;
 final int kMaxWaves = kFloors.length * kWavesPerFloor;
-const double kWaveTime = 22;
+
+/// ---------------------------------------------------------------------------
+/// Procedural map: rooms joined by corridors on a tile grid
+/// ---------------------------------------------------------------------------
+class GameMap {
+  GameMap(this.cols, this.rows, this.cell)
+      : floor = List<bool>.filled(cols * rows, false),
+        rooms = [];
+
+  final int cols;
+  final int rows;
+  final double cell;
+  final List<bool> floor;
+  final List<Rect> rooms; // tile coordinates
+
+  double get worldW => cols * cell;
+  double get worldH => rows * cell;
+  Size get size => Size(worldW, worldH);
+
+  bool _in(int c, int r) => c >= 0 && r >= 0 && c < cols && r < rows;
+  bool tile(int c, int r) => _in(c, r) && floor[r * cols + c];
+  void carve(int c, int r) {
+    if (_in(c, r)) floor[r * cols + c] = true;
+  }
+
+  bool walkable(double x, double y) =>
+      tile((x / cell).floor(), (y / cell).floor());
+
+  Offset roomCenter(int idx) {
+    final rr = rooms[idx.clamp(0, rooms.length - 1).toInt()];
+    return Offset((rr.left + rr.width / 2) * cell,
+        (rr.top + rr.height / 2) * cell);
+  }
+
+  Offset randomFloor(Random rng) {
+    for (var i = 0; i < 240; i++) {
+      final c = rng.nextInt(cols);
+      final r = rng.nextInt(rows);
+      if (floor[r * cols + c]) return Offset((c + 0.5) * cell, (r + 0.5) * cell);
+    }
+    return roomCenter(0);
+  }
+
+  static GameMap generate(Random rng, double sw, double sh, int wave) {
+    const cell = 60.0;
+    final cols = ((sw * 2.4) / cell).round().clamp(18, 42).toInt();
+    final rows = ((sh * 2.4) / cell).round().clamp(18, 64).toInt();
+    final m = GameMap(cols, rows, cell);
+    final roomCount = 5 + rng.nextInt(3) + wave ~/ 5;
+    final centers = <Point<int>>[];
+    for (var i = 0; i < roomCount; i++) {
+      final rw = 4 + rng.nextInt(6);
+      final rh = 4 + rng.nextInt(6);
+      final rx = 2 + rng.nextInt(max(1, cols - rw - 4));
+      final ry = 2 + rng.nextInt(max(1, rows - rh - 4));
+      for (var c = rx; c < rx + rw; c++) {
+        for (var r = ry; r < ry + rh; r++) {
+          m.carve(c, r);
+        }
+      }
+      m.rooms.add(Rect.fromLTWH(
+          rx.toDouble(), ry.toDouble(), rw.toDouble(), rh.toDouble()));
+      centers.add(Point<int>(rx + rw ~/ 2, ry + rh ~/ 2));
+    }
+    for (var i = 1; i < centers.length; i++) {
+      final a = centers[i - 1];
+      final b = centers[i];
+      for (var x = min(a.x, b.x); x <= max(a.x, b.x); x++) {
+        m.carve(x, a.y);
+        m.carve(x, a.y + 1);
+      }
+      for (var y = min(a.y, b.y); y <= max(a.y, b.y); y++) {
+        m.carve(b.x, y);
+        m.carve(b.x + 1, y);
+      }
+    }
+    return m;
+  }
+}
 
 /// ---------------------------------------------------------------------------
 /// Title
@@ -419,7 +497,7 @@ class _TitleScreenState extends State<TitleScreen> {
 }
 
 /// ---------------------------------------------------------------------------
-/// Home / Mirror (meta upgrades bought with Shards)
+/// Home / Mirror
 /// ---------------------------------------------------------------------------
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -448,7 +526,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Text(
-                'Earn shards every run. Spend them here for permanent boosts.',
+                'Earn shards every run. Spend them for permanent boosts.',
                 style: TextStyle(color: Colors.white54, fontSize: 12)),
           ),
           Expanded(
@@ -498,7 +576,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               const SizedBox(height: 4),
                               Text('level $lv / ${m.maxLvl}',
                                   style: const TextStyle(
-                                      color: Color(0xFF8CC8FF), fontSize: 11)),
+                                      color: Color(0xFF8CC8FF),
+                                      fontSize: 11)),
                             ],
                           ),
                         ),
@@ -695,6 +774,7 @@ class Enemy {
     required this.radius,
     required this.kind,
     required this.bounty,
+    required this.xp,
   }) : maxHp = hp;
 
   Offset pos;
@@ -705,6 +785,7 @@ class Enemy {
   double radius;
   int kind;
   int bounty;
+  int xp;
   double touchTimer = 0;
   double shootTimer = 1.4;
   double dotTimer = 0;
@@ -735,8 +816,9 @@ class EBolt {
 }
 
 class Orb {
-  Orb(this.pos);
+  Orb(this.pos, this.xp);
   Offset pos;
+  int xp;
 }
 
 class Burst {
@@ -779,7 +861,7 @@ class GameStats {
 enum Phase { playing, roomCleared, paused, levelUp, shop, gameOver, victory }
 
 /// ---------------------------------------------------------------------------
-/// Game screen
+/// Game
 /// ---------------------------------------------------------------------------
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key, required this.def});
@@ -796,7 +878,7 @@ class _GameScreenState extends State<GameScreen>
   final Random _rng = Random();
 
   Size _size = Size.zero;
-  Size _arena = Size.zero;
+  late GameMap _map;
   bool _ready = false;
 
   late Player _p;
@@ -810,7 +892,8 @@ class _GameScreenState extends State<GameScreen>
 
   Phase _phase = Phase.playing;
   int _wave = 1;
-  double _waveTime = kWaveTime;
+  int _toSpawn = 0;
+  bool _bossSpawned = false;
   double _spawnTimer = 0;
   bool _boonThenNext = false;
 
@@ -830,10 +913,11 @@ class _GameScreenState extends State<GameScreen>
       ((_wave - 1) ~/ kWavesPerFloor).clamp(0, kFloors.length - 1).toInt();
   FloorDef get _floor => kFloors[_floorIdx];
   bool get _bossWave => _wave % kWavesPerFloor == 0;
+  int get _enemiesLeft => _enemies.length + _toSpawn;
 
   Rect get _abilityRect =>
       Rect.fromLTWH(_size.width - 98, _size.height - 108, 78, 78);
-  Rect get _pauseRect => Rect.fromLTWH(_size.width - 56, 70, 42, 42);
+  Rect get _pauseRect => Rect.fromLTWH(_size.width - 56, 84, 42, 42);
 
   @override
   void initState() {
@@ -848,10 +932,9 @@ class _GameScreenState extends State<GameScreen>
     super.dispose();
   }
 
-  void _initRun() {
-    _arena = Size(_size.width * 1.9, _size.height * 1.9);
-    _p = Player(widget.def);
-    _p.pos = Offset(_arena.width / 2, _arena.height / 2);
+  void _genRoom() {
+    _map = GameMap.generate(_rng, _size.width, _size.height, _wave);
+    _p.pos = _map.roomCenter(0);
     _enemies.clear();
     _bolts.clear();
     _ebolts.clear();
@@ -859,11 +942,19 @@ class _GameScreenState extends State<GameScreen>
     _bursts.clear();
     _texts.clear();
     _doors.clear();
+    _bossSpawned = false;
+    _spawnTimer = 0.6;
+    _toSpawn = _bossWave
+        ? 7
+        : (6 + _wave * 2).clamp(6, 26).toInt();
+  }
+
+  void _initRun() {
+    _p = Player(widget.def);
     _wave = 1;
-    _waveTime = kWaveTime;
-    _spawnTimer = 0;
     _shake = 0;
     _boonThenNext = false;
+    _genRoom();
     _phase = Phase.playing;
     _ready = true;
   }
@@ -885,15 +976,24 @@ class _GameScreenState extends State<GameScreen>
     setState(() {});
   }
 
-  void _update(double dt) {
-    final aw = _arena.width, ah = _arena.height;
+  bool _free(Offset p, double rad) =>
+      _map.walkable(p.dx, p.dy) &&
+      _map.walkable(p.dx - rad, p.dy) &&
+      _map.walkable(p.dx + rad, p.dy) &&
+      _map.walkable(p.dx, p.dy - rad) &&
+      _map.walkable(p.dx, p.dy + rad);
 
+  Offset _slide(Offset pos, Offset delta, double rad) {
+    var nx = pos.dx;
+    var ny = pos.dy;
+    if (_free(Offset(pos.dx + delta.dx, pos.dy), rad)) nx = pos.dx + delta.dx;
+    if (_free(Offset(nx, pos.dy + delta.dy), rad)) ny = pos.dy + delta.dy;
+    return Offset(nx, ny);
+  }
+
+  void _update(double dt) {
     if (_moveDir != Offset.zero) {
-      final n = _p.pos + _moveDir * _p.speed * dt;
-      _p.pos = Offset(
-        n.dx.clamp(_p.radius + 8, aw - _p.radius - 8).toDouble(),
-        n.dy.clamp(_p.radius + 8, ah - _p.radius - 8).toDouble(),
-      );
+      _p.pos = _slide(_p.pos, _moveDir * _p.speed * dt, _p.radius * 0.7);
       _facing = _moveDir;
     }
     if (_p.hurtFlash > 0) _p.hurtFlash -= dt;
@@ -909,14 +1009,26 @@ class _GameScreenState extends State<GameScreen>
       b.t += dt;
     }
     _bursts.removeWhere((b) => b.t > 0.35);
-
     for (final t in _texts) {
       t.pos = t.pos.translate(0, -34 * dt);
       t.life -= dt;
     }
     _texts.removeWhere((t) => t.life <= 0);
 
-    // Between rooms: just walk to a door.
+    // orbs always collectible (including while roaming a cleared room)
+    for (final o in _orbs) {
+      final dir = _p.pos - o.pos;
+      final d = dir.distance;
+      if (d < 140 && d > 0.01) o.pos += dir / d * 280 * dt;
+    }
+    _orbs.removeWhere((o) {
+      if ((o.pos - _p.pos).distance < _p.radius + 9) {
+        _gainXp(o.xp);
+        return true;
+      }
+      return false;
+    });
+
     if (_phase == Phase.roomCleared) {
       for (final d in _doors) {
         if ((d.pos - _p.pos).distance < _p.radius + d.r) {
@@ -927,16 +1039,12 @@ class _GameScreenState extends State<GameScreen>
       return;
     }
 
-    _waveTime -= dt;
-    if (_waveTime <= 0) {
-      _roomEnd();
-      return;
-    }
-
+    // spawn until quota met, capped concurrent
     _spawnTimer -= dt;
-    if (_spawnTimer <= 0) {
+    if (_toSpawn > 0 && _spawnTimer <= 0 && _enemies.length < 20) {
       _spawnEnemy();
-      _spawnTimer = (1.45 - _wave * 0.035).clamp(0.30, 1.45).toDouble();
+      _toSpawn--;
+      _spawnTimer = (0.85 - _wave * 0.012).clamp(0.28, 0.85).toDouble();
     }
 
     _p.fireTimer -= dt;
@@ -965,12 +1073,7 @@ class _GameScreenState extends State<GameScreen>
       b.pos += b.vel * dt;
       b.life -= dt;
     }
-    _bolts.removeWhere((b) =>
-        b.life <= 0 ||
-        b.pos.dx < -30 ||
-        b.pos.dx > aw + 30 ||
-        b.pos.dy < -30 ||
-        b.pos.dy > ah + 30);
+    _bolts.removeWhere((b) => b.life <= 0 || !_map.walkable(b.pos.dx, b.pos.dy));
 
     for (final e in _ebolts) {
       e.pos += e.vel * dt;
@@ -981,22 +1084,18 @@ class _GameScreenState extends State<GameScreen>
         if (_phase != Phase.playing) return;
       }
     }
-    _ebolts.removeWhere((e) =>
-        e.life <= 0 ||
-        e.pos.dx < -30 ||
-        e.pos.dx > aw + 30 ||
-        e.pos.dy < -30 ||
-        e.pos.dy > ah + 30);
+    _ebolts.removeWhere(
+        (e) => e.life <= 0 || !_map.walkable(e.pos.dx, e.pos.dy));
 
     for (final e in _enemies) {
       final dir = _p.pos - e.pos;
       final d = dir.distance;
-
+      final rad = e.radius * 0.7;
       if (e.kind == 4) {
         if (d < 220 && d > 0.01) {
-          e.pos -= dir / d * e.speed * dt;
-        } else if (d > 300) {
-          e.pos += dir / d * e.speed * dt;
+          e.pos = _slide(e.pos, -dir / d * e.speed * dt, rad);
+        } else if (d > 300 && d > 0.01) {
+          e.pos = _slide(e.pos, dir / d * e.speed * dt, rad);
         }
         e.shootTimer -= dt;
         if (e.shootTimer <= 0 && d < 460 && d > 0.01) {
@@ -1004,7 +1103,7 @@ class _GameScreenState extends State<GameScreen>
           _ebolts.add(EBolt(e.pos, dir / d * 220, e.damage));
         }
       } else if (d > 0.01) {
-        e.pos += dir / d * e.speed * dt;
+        e.pos = _slide(e.pos, dir / d * e.speed * dt, rad);
       }
 
       if (e.dotTimer > 0) {
@@ -1059,7 +1158,7 @@ class _GameScreenState extends State<GameScreen>
     _enemies.removeWhere((e) {
       if (e.hp <= 0) {
         if (e.kind == 3) _shake = max(_shake, 11.0);
-        _orbs.add(Orb(e.pos));
+        _orbs.add(Orb(e.pos, e.xp));
         _p.obols += e.bounty;
         _p.mp = (_p.mp + 0.8).clamp(0, _p.maxMp).toDouble();
         if (_p.lifesteal > 0) {
@@ -1071,18 +1170,7 @@ class _GameScreenState extends State<GameScreen>
       return false;
     });
 
-    for (final o in _orbs) {
-      final dir = _p.pos - o.pos;
-      final d = dir.distance;
-      if (d < 130 && d > 0.01) o.pos += dir / d * 260 * dt;
-    }
-    _orbs.removeWhere((o) {
-      if ((o.pos - _p.pos).distance < _p.radius + 8) {
-        _gainXp();
-        return true;
-      }
-      return false;
-    });
+    if (_toSpawn <= 0 && _enemies.isEmpty) _roomEnd();
   }
 
   void _hurtPlayer(double dmg) {
@@ -1161,7 +1249,9 @@ class _GameScreenState extends State<GameScreen>
             final v = e.pos - _p.pos;
             if (v.distance < 150) {
               _damageEnemy(e, d * 4, true);
-              if (v.distance > 0.01) e.pos += v / v.distance * 70;
+              if (v.distance > 0.01) {
+                e.pos = _slide(e.pos, v / v.distance * 70, e.radius * 0.7);
+              }
             }
           }
           break;
@@ -1184,7 +1274,7 @@ class _GameScreenState extends State<GameScreen>
         }
       case HeroClass.mage:
         {
-          final tgt = _nearestEnemy(2000);
+          final tgt = _nearestEnemy(4000);
           final at = tgt?.pos ?? _p.pos;
           _bursts.add(Burst(at, 130));
           _shake = max(_shake, 10.0);
@@ -1204,7 +1294,7 @@ class _GameScreenState extends State<GameScreen>
         }
       case HeroClass.assassin:
         {
-          final tgt = _nearestEnemy(2000);
+          final tgt = _nearestEnemy(4000);
           if (tgt != null) _p.pos = tgt.pos;
           _p.invuln = 1.0;
           _bursts.add(Burst(_p.pos, 70));
@@ -1224,24 +1314,33 @@ class _GameScreenState extends State<GameScreen>
         widget.def.abilityName, const Color(0xFF8CC8FF)));
   }
 
-  Offset _spawnPos() {
-    final ang = _rng.nextDouble() * pi * 2;
-    final rad = max(_size.width, _size.height) * 0.62 * _p.vision + 30;
-    final x = (_p.pos.dx + cos(ang) * rad)
-        .clamp(20.0, _arena.width - 20)
-        .toDouble();
-    final y = (_p.pos.dy + sin(ang) * rad)
-        .clamp(20.0, _arena.height - 20)
-        .toDouble();
-    return Offset(x, y);
+  Offset _spawnPoint() {
+    for (var i = 0; i < 60; i++) {
+      final p = _map.randomFloor(_rng);
+      final d = (p - _p.pos).distance;
+      if (d > 220 && d < 760) return p;
+    }
+    return _map.randomFloor(_rng);
+  }
+
+  int _xpFor(int kind) {
+    final base = switch (kind) {
+      1 => 1,
+      2 => 4,
+      3 => 14,
+      4 => 3,
+      _ => 1,
+    };
+    return base + _floorIdx;
   }
 
   void _spawnEnemy() {
-    final p = _spawnPos();
+    final p = _spawnPoint();
     final f = _floor;
     final ws = 1 + _wave * 0.05;
 
-    if (_bossWave && _enemies.where((e) => e.kind == 3).isEmpty) {
+    if (_bossWave && !_bossSpawned) {
+      _bossSpawned = true;
       _enemies.add(Enemy(
         pos: p,
         hp: (26 + _wave * 5) * f.hpMul,
@@ -1250,6 +1349,7 @@ class _GameScreenState extends State<GameScreen>
         radius: 36,
         kind: 3,
         bounty: 25,
+        xp: _xpFor(3),
       ));
       return;
     }
@@ -1264,6 +1364,7 @@ class _GameScreenState extends State<GameScreen>
         radius: 14,
         kind: 4,
         bounty: 2,
+        xp: _xpFor(4),
       ));
     } else if (roll < 0.30 + _floorIdx * 0.02) {
       _enemies.add(Enemy(
@@ -1274,6 +1375,7 @@ class _GameScreenState extends State<GameScreen>
         radius: 11,
         kind: 1,
         bounty: 1,
+        xp: _xpFor(1),
       ));
     } else if (roll < 0.44) {
       _enemies.add(Enemy(
@@ -1284,6 +1386,7 @@ class _GameScreenState extends State<GameScreen>
         radius: 23,
         kind: 2,
         bounty: 3,
+        xp: _xpFor(2),
       ));
     } else {
       _enemies.add(Enemy(
@@ -1294,17 +1397,19 @@ class _GameScreenState extends State<GameScreen>
         radius: 15,
         kind: 0,
         bounty: 1,
+        xp: _xpFor(0),
       ));
     }
   }
 
-  void _gainXp() {
-    _p.xp++;
-    if (_p.xp >= _p.xpToNext) {
+  void _gainXp(int amount) {
+    _p.xp += amount;
+    while (_p.xp >= _p.xpToNext) {
       _p.xp -= _p.xpToNext;
       _p.level++;
       _p.xpToNext = 5 + _p.level * 3;
       _openBoon();
+      return; // resolve one boon at a time; rest applied after pick
     }
   }
 
@@ -1348,26 +1453,24 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _roomEnd() {
-    _enemies.clear();
-    _ebolts.clear();
-    _p.obols += 3 + _wave * 2;
+    _p.obols += 4 + _wave * 2;
     if (_wave >= kMaxWaves) {
       _victory();
       return;
     }
     if (_wave - 1 > GameStats.bestWave) GameStats.bestWave = _wave - 1;
     _doors.clear();
-    final topY = _p.radius + 70;
+    final rc = _map.rooms.length;
     if (_bossWave) {
       _doors.add(Door(
-        Offset(_arena.width / 2, topY),
+        _map.roomCenter(rc - 1),
         DoorDef('🛒', "CHARON'S SHOP", 'spend your obols', DoorKind.shop,
             (_) {}),
       ));
     } else {
       final picks = _rollDoorDefs();
-      _doors.add(Door(Offset(_arena.width * 0.34, topY), picks[0]));
-      _doors.add(Door(Offset(_arena.width * 0.66, topY), picks[1]));
+      _doors.add(Door(_map.roomCenter(rc - 1), picks[0]));
+      _doors.add(Door(_map.roomCenter(rc - 2), picks[1]));
     }
     _phase = Phase.roomCleared;
   }
@@ -1409,11 +1512,8 @@ class _GameScreenState extends State<GameScreen>
 
   void _nextRoom() {
     _wave++;
-    _waveTime = kWaveTime;
-    _spawnTimer = 0;
-    _doors.clear();
     _p.hp = (_p.hp + _p.maxHp * 0.12).clamp(0, _p.maxHp).toDouble();
-    _p.pos = Offset(_arena.width / 2, _arena.height / 2);
+    _genRoom();
     setState(() => _phase = Phase.playing);
   }
 
@@ -1541,9 +1641,8 @@ class _GameScreenState extends State<GameScreen>
                       bursts: _bursts,
                       texts: _texts,
                       doors: _doors,
+                      map: _ready ? _map : null,
                       floor: _floor,
-                      floorIdx: _floorIdx,
-                      arena: _arena,
                       time: _elapsed,
                       facing: _facing,
                       moving: _moveDir != Offset.zero,
@@ -1559,7 +1658,7 @@ class _GameScreenState extends State<GameScreen>
                 if (_ready) _hud(),
                 if (_ready && _phase == Phase.playing) _abilityButton(),
                 if (_ready && play) _pauseButton(),
-                if (_phase == Phase.roomCleared) _doorHint(),
+                if (_phase == Phase.roomCleared) _doorPanel(),
                 if (_phase == Phase.paused) _pauseOverlay(),
                 if (_phase == Phase.levelUp) _levelUpOverlay(),
                 if (_phase == Phase.shop) _shopOverlay(),
@@ -1573,17 +1672,54 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
-  Widget _doorHint() {
-    return const Positioned(
-      left: 0,
-      right: 0,
-      bottom: 40,
-      child: Center(
-        child: Text('walk into a door →',
-            style: TextStyle(
-                color: Colors.white70,
-                fontSize: 16,
-                fontWeight: FontWeight.w900)),
+  Widget _doorPanel() {
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: 26,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('ROOM CLEAR · walk into a door',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 14)),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (final dr in _doors)
+                Container(
+                  width: 150,
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xCC1F1D2E),
+                    borderRadius: BorderRadius.circular(12),
+                    border:
+                        Border.all(color: const Color(0xFFFFD45E), width: 1.5),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(dr.def.icon,
+                          style: const TextStyle(fontSize: 22)),
+                      Text(dr.def.title,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              color: Color(0xFFFFD45E),
+                              fontWeight: FontWeight.w900,
+                              fontSize: 12)),
+                      Text(dr.def.desc,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              color: Colors.white60, fontSize: 10)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1713,7 +1849,7 @@ class _GameScreenState extends State<GameScreen>
                   Text(
                       _phase == Phase.roomCleared
                           ? 'CLEAR'
-                          : '⏱${_waveTime.ceil()}',
+                          : '👾$_enemiesLeft',
                       style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 12,
@@ -2215,6 +2351,57 @@ void _ears(Canvas canvas, Offset c, double r, Paint p) {
   canvas.drawCircle(c.translate(r * 0.78, -r * 0.78), r * 0.34, p);
 }
 
+void _drawProp(Canvas canvas, Offset c, double s, int kind, FloorDef f) {
+  final dark = Paint()..color = _shd(f.prop, 0.45);
+  switch (kind) {
+    case 0: // tree
+      canvas.drawRect(
+          Rect.fromCenter(
+              center: c.translate(0, s * 0.34),
+              width: s * 0.16,
+              height: s * 0.5),
+          Paint()..color = _shd(f.prop, 0.3));
+      canvas.drawCircle(c.translate(0, -s * 0.08), s * 0.34,
+          Paint()..color = f.prop);
+      canvas.drawCircle(c.translate(-s * 0.12, -s * 0.2), s * 0.2,
+          Paint()..color = _lit(f.prop, 0.15));
+      break;
+    case 1: // rock
+      canvas.drawCircle(c, s * 0.34, dark);
+      canvas.drawCircle(c.translate(-s * 0.1, -s * 0.1), s * 0.16,
+          Paint()..color = _lit(f.prop, 0.12));
+      break;
+    case 2: // pillar
+      canvas.drawRRect(
+          RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                  center: c, width: s * 0.34, height: s * 0.78),
+              const Radius.circular(4)),
+          Paint()..color = f.prop);
+      canvas.drawRect(
+          Rect.fromCenter(
+              center: c.translate(0, -s * 0.36),
+              width: s * 0.46,
+              height: s * 0.12),
+          Paint()..color = _lit(f.prop, 0.1));
+      break;
+    case 3: // crystal
+      final pth = Path()
+        ..moveTo(c.dx, c.dy - s * 0.4)
+        ..lineTo(c.dx + s * 0.22, c.dy)
+        ..lineTo(c.dx, c.dy + s * 0.34)
+        ..lineTo(c.dx - s * 0.22, c.dy)
+        ..close();
+      canvas.drawPath(pth, Paint()..color = _lit(f.mob, 0.1));
+      break;
+    default: // bush / debris
+      canvas.drawCircle(c.translate(-s * 0.12, 0), s * 0.18,
+          Paint()..color = f.prop);
+      canvas.drawCircle(c.translate(s * 0.12, s * 0.04), s * 0.2,
+          Paint()..color = _shd(f.prop, 0.18));
+  }
+}
+
 class HeroPreviewPainter extends CustomPainter {
   HeroPreviewPainter({required this.def});
   final HeroDef def;
@@ -2243,9 +2430,8 @@ class WorldPainter extends CustomPainter {
     required this.bursts,
     required this.texts,
     required this.doors,
+    required this.map,
     required this.floor,
-    required this.floorIdx,
-    required this.arena,
     required this.time,
     required this.facing,
     required this.moving,
@@ -2265,9 +2451,8 @@ class WorldPainter extends CustomPainter {
   final List<Burst> bursts;
   final List<FloatText> texts;
   final List<Door> doors;
+  final GameMap? map;
   final FloorDef floor;
-  final int floorIdx;
-  final Size arena;
   final double time;
   final Offset facing;
   final bool moving;
@@ -2280,11 +2465,12 @@ class WorldPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF09090F));
-    if (!ready || arena == Size.zero) return;
+    canvas.drawRect(
+        Offset.zero & size, Paint()..color = const Color(0xFF06060B));
+    final m = map;
+    if (!ready || m == null) return;
 
-    // ---- camera ----
-    final aw = arena.width, ah = arena.height;
+    final aw = m.worldW, ah = m.worldH;
     final fit = min(size.width / aw, size.height / ah);
     final z = (1.0 / (player.vision <= 0 ? 1.0 : player.vision))
         .clamp(fit, 1.25)
@@ -2306,12 +2492,11 @@ class WorldPainter extends CustomPainter {
     }
     canvas.translate(-cx, -cy);
 
-    _paintArena(canvas);
+    _paintMap(canvas, m);
     _paintWorld(canvas);
 
     canvas.restore();
 
-    // ---- screen-space overlays ----
     if (lowHp) {
       final a = 0.22 + 0.16 * (0.5 + 0.5 * sin(time * 7));
       canvas.drawRect(
@@ -2328,7 +2513,7 @@ class WorldPainter extends CustomPainter {
       );
     }
 
-    _paintMinimap(canvas, size);
+    _paintMinimap(canvas, size, m);
 
     if (stickOn) {
       canvas.drawCircle(stickOrigin, 60,
@@ -2345,108 +2530,72 @@ class WorldPainter extends CustomPainter {
     }
   }
 
-  void _paintArena(Canvas canvas) {
-    final aw = arena.width, ah = arena.height;
-    final rect = Rect.fromLTWH(0, 0, aw, ah);
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [_lit(floor.bg, 0.05), floor.bg, _shd(floor.bg, 0.28)],
-          stops: const [0.0, 0.5, 1.0],
-        ).createShader(rect),
-    );
+  void _paintMap(Canvas canvas, GameMap m) {
+    final cell = m.cell;
+    // void backdrop
+    canvas.drawRect(Rect.fromLTWH(0, 0, m.worldW, m.worldH),
+        Paint()..color = floor.voidc);
 
-    final grid = Paint()
+    final floorPaint = Paint()..color = floor.bg;
+    final edge = Paint()
       ..color = floor.grid.withValues(alpha: 0.5)
+      ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
-    for (double x = 0; x < aw; x += 56) {
-      canvas.drawLine(Offset(x, 0), Offset(x, ah), grid);
-    }
-    for (double y = 0; y < ah; y += 56) {
-      canvas.drawLine(Offset(0, y), Offset(aw, y), grid);
-    }
 
-    // floor decorations: columns / bridge
-    final prop = Paint()..color = floor.prop;
-    final propEdge = Paint()
-      ..color = _shd(floor.prop, 0.3)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-    final cols = <Offset>[
-      Offset(aw * 0.22, ah * 0.24),
-      Offset(aw * 0.78, ah * 0.24),
-      Offset(aw * 0.22, ah * 0.76),
-      Offset(aw * 0.78, ah * 0.76),
-      Offset(aw * 0.5, ah * 0.5),
-      Offset(aw * 0.5, ah * 0.16),
-    ];
-    if (floorIdx == 1 || floorIdx == 4) {
-      // a bridge band across the middle
-      final bridge = Rect.fromLTWH(0, ah * 0.46, aw, ah * 0.08);
-      canvas.drawRect(bridge, Paint()..color = _shd(floor.prop, 0.1));
-      canvas.drawRect(bridge, propEdge);
+    for (var r = 0; r < m.rows; r++) {
+      for (var c = 0; c < m.cols; c++) {
+        final isFloor = m.tile(c, r);
+        final rect = Rect.fromLTWH(c * cell, r * cell, cell, cell);
+        if (isFloor) {
+          canvas.drawRect(rect, floorPaint);
+          canvas.drawRect(rect.deflate(0.5), edge);
+        } else {
+          // prop on wall tiles that border the floor (frames the rooms)
+          final border = m.tile(c - 1, r) ||
+              m.tile(c + 1, r) ||
+              m.tile(c, r - 1) ||
+              m.tile(c, r + 1);
+          final h = (c * 73 + r * 131) % 100;
+          if (border && h < 78) {
+            _drawProp(
+                canvas,
+                Offset((c + 0.5) * cell, (r + 0.5) * cell),
+                cell,
+                h % 5,
+                floor);
+          } else if (!border && h < 8) {
+            _drawProp(canvas, Offset((c + 0.5) * cell, (r + 0.5) * cell),
+                cell, 1, floor);
+          }
+        }
+      }
     }
-    for (var i = 0; i < cols.length; i++) {
-      final cpos = cols[i];
-      final cr = 26.0 + (i % 3) * 6;
-      canvas.drawCircle(cpos.translate(0, 6),
-          cr, Paint()..color = const Color(0x33000000));
-      canvas.drawCircle(cpos, cr, prop);
-      canvas.drawCircle(cpos, cr, propEdge);
-      canvas.drawCircle(cpos.translate(-cr * 0.3, -cr * 0.3), cr * 0.35,
-          Paint()..color = _lit(floor.prop, 0.18));
-    }
-
-    // border walls
-    final wall = Paint()
-      ..color = floor.wall
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 18;
-    canvas.drawRect(rect.deflate(9), wall);
-    canvas.drawRect(
-        rect.deflate(2),
-        Paint()
-          ..color = _shd(floor.wall, 0.35)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 4);
   }
 
   void _paintWorld(Canvas canvas) {
-    // doors
     for (final d in doors) {
       final pulse = 0.5 + 0.5 * sin(time * 4 + d.pos.dx);
-      canvas.drawCircle(d.pos, d.r + 10,
-          Paint()..color = const Color(0xFFFFD45E).withValues(alpha: 0.18));
+      canvas.drawCircle(d.pos, d.r + 12,
+          Paint()..color = const Color(0xFFFFD45E).withValues(alpha: 0.2));
       final arch = RRect.fromRectAndRadius(
-        Rect.fromCenter(
-            center: d.pos, width: d.r * 2, height: d.r * 2.4),
+        Rect.fromCenter(center: d.pos, width: d.r * 2, height: d.r * 2.4),
         Radius.circular(d.r),
       );
-      canvas.drawRRect(arch, Paint()..color = _shd(floor.bg, 0.4));
+      canvas.drawRRect(arch, Paint()..color = _shd(floor.bg, 0.5));
       canvas.drawRRect(
           arch,
           Paint()
-            ..color = Color.lerp(const Color(0xFFFFD45E),
-                Colors.white, pulse * 0.4)!
+            ..color = Color.lerp(
+                const Color(0xFFFFD45E), Colors.white, pulse * 0.4)!
             ..style = PaintingStyle.stroke
             ..strokeWidth = 4);
       final tp = TextPainter(
         text: TextSpan(
-          text: '${d.def.icon}\n${d.def.title}\n${d.def.desc}',
-          style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              height: 1.3,
-              fontWeight: FontWeight.w900),
-        ),
-        textAlign: TextAlign.center,
+            text: d.def.icon,
+            style: const TextStyle(fontSize: 26)),
         textDirection: TextDirection.ltr,
-      )..layout(maxWidth: 160);
-      tp.paint(canvas,
-          d.pos.translate(-tp.width / 2, -d.r * 1.2 - tp.height - 6));
+      )..layout();
+      tp.paint(canvas, d.pos - Offset(tp.width / 2, tp.height / 2));
     }
 
     for (final b in bursts) {
@@ -2464,7 +2613,7 @@ class WorldPainter extends CustomPainter {
 
     for (final o in orbs) {
       final pul = 0.5 + 0.5 * sin(time * 6 + o.pos.dx);
-      canvas.drawCircle(o.pos, 10,
+      canvas.drawCircle(o.pos, 11,
           Paint()..color = const Color(0xFF8CFF98).withValues(alpha: 0.22));
       canvas.drawCircle(
           o.pos, 4 + pul * 1.6, Paint()..color = const Color(0xFFB6FFC0));
@@ -2550,7 +2699,6 @@ class WorldPainter extends CustomPainter {
               ..color = Colors.white.withValues(
                   alpha: (e.flash / 0.1).clamp(0.0, 1.0).toDouble() * 0.7));
       }
-      // HP bar on ALL enemies
       final bw = e.radius * 2;
       final by = e.pos.dy - e.radius - 9;
       canvas.drawRRect(
@@ -2610,7 +2758,7 @@ class WorldPainter extends CustomPainter {
 
     for (final tx in texts) {
       final a = tx.life.clamp(0.0, 1.0).toDouble();
-      void d(Color col, Offset at) {
+      void dr(Color col, Offset at) {
         final tp = TextPainter(
           text: TextSpan(
             text: tx.text,
@@ -2624,38 +2772,50 @@ class WorldPainter extends CustomPainter {
         tp.paint(canvas, at - Offset(tp.width / 2, tp.height / 2));
       }
 
-      d(Colors.black, tx.pos.translate(1.4, 1.4));
-      d(tx.color, tx.pos);
+      dr(Colors.black, tx.pos.translate(1.4, 1.4));
+      dr(tx.color, tx.pos);
     }
   }
 
-  void _paintMinimap(Canvas canvas, Size size) {
-    final mw = 96.0;
-    final mh = mw * (arena.height / arena.width);
+  void _paintMinimap(Canvas canvas, Size size, GameMap m) {
+    const mw = 92.0;
+    final mh = mw * (m.worldH / m.worldW);
     final ox = 12.0;
     final oy = size.height - mh - 14;
     final rect = Rect.fromLTWH(ox, oy, mw, mh);
     canvas.drawRRect(
         RRect.fromRectAndRadius(rect, const Radius.circular(6)),
-        Paint()..color = Colors.black.withValues(alpha: 0.45));
+        Paint()..color = Colors.black.withValues(alpha: 0.5));
+    final fp = Paint()..color = floor.bg.withValues(alpha: 0.9);
+    final sx = mw / m.cols;
+    final sy = mh / m.rows;
+    for (var r = 0; r < m.rows; r++) {
+      for (var c = 0; c < m.cols; c++) {
+        if (m.tile(c, r)) {
+          canvas.drawRect(
+              Rect.fromLTWH(ox + c * sx, oy + r * sy, sx + 0.6, sy + 0.6),
+              fp);
+        }
+      }
+    }
     canvas.drawRRect(
         RRect.fromRectAndRadius(rect, const Radius.circular(6)),
         Paint()
           ..color = Colors.white24
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1);
-    Offset map(Offset w) => Offset(
-        ox + w.dx / arena.width * mw, oy + w.dy / arena.height * mh);
+    Offset mp(Offset w) =>
+        Offset(ox + w.dx / m.worldW * mw, oy + w.dy / m.worldH * mh);
     final ep = Paint()..color = const Color(0xFFFF5C6C);
     for (final e in enemies) {
-      canvas.drawCircle(map(e.pos), 1.6, ep);
+      canvas.drawCircle(mp(e.pos), 1.6, ep);
     }
     final dp = Paint()..color = const Color(0xFFFFD45E);
     for (final dr in doors) {
-      canvas.drawCircle(map(dr.pos), 3, dp);
+      canvas.drawCircle(mp(dr.pos), 3, dp);
     }
     canvas.drawCircle(
-        map(player.pos), 3, Paint()..color = const Color(0xFF8CFF98));
+        mp(player.pos), 3, Paint()..color = const Color(0xFF8CFF98));
   }
 
   @override
