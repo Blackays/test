@@ -1166,6 +1166,11 @@ class _GameScreenState extends State<GameScreen>
     setState(() => _phase = Phase.playing);
   }
 
+  void _gameOver() {
+    if (_wave > GameStats.bestWave) GameStats.bestWave = _wave;
+    _phase = Phase.gameOver;
+  }
+
   // ---- shop ----
   List<ShopItem> _rollShop() {
     final mul = 1 + _floorIdx * 0.6;
