@@ -44,8 +44,10 @@ jobs:
 
       # base-href must match the repo name for GitHub Project Pages
       # (https://<owner>.github.io/<repo>/). Repo is "test" -> /test/.
+      # --no-web-resources-cdn self-hosts CanvasKit so the deployed game
+      # works on networks that block gstatic.com (offline-first).
       - name: Build web
-        run: flutter build web --release --base-href /test/
+        run: flutter build web --release --base-href /test/ --no-web-resources-cdn
 
       # Publish the playable web build to the gh-pages branch.
       # Open Settings -> Pages -> Deploy from branch -> gh-pages (once).

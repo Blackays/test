@@ -25,7 +25,8 @@ class BuffBattleApp extends StatelessWidget {
         useMaterial3: true,
         brightness: Brightness.dark,
         scaffoldBackgroundColor: const Color(0xFF14131F),
-        fontFamily: 'monospace',
+        fontFamily: 'RobotoMono',
+        fontFamilyFallback: const ['NotoEmoji'],
       ),
       builder: (context, child) => _LandscapeGate(child: child!),
       home: const TitleScreen(),
@@ -3448,13 +3449,17 @@ class WorldPainter extends CustomPainter {
       final tp = TextPainter(
         text: TextSpan(
             text: d.def.icon,
-            style: const TextStyle(fontSize: 26)),
+            style: const TextStyle(fontSize: 26, fontFamily: 'NotoEmoji')),
         textDirection: TextDirection.ltr,
       )..layout();
       tp.paint(canvas, d.pos - Offset(tp.width / 2, tp.height / 2));
       // label so the player knows what each door grants on approach
       final lp = TextPainter(
-        text: TextSpan(children: [
+        text: TextSpan(
+            style: const TextStyle(
+                fontFamily: 'RobotoMono',
+                fontFamilyFallback: ['NotoEmoji']),
+            children: [
           TextSpan(
               text: '${d.def.title}\n',
               style: const TextStyle(
@@ -3700,7 +3705,9 @@ class WorldPainter extends CustomPainter {
             style: TextStyle(
                 color: col.withValues(alpha: a),
                 fontSize: 14,
-                fontWeight: FontWeight.w900),
+                fontWeight: FontWeight.w900,
+                fontFamily: 'RobotoMono',
+                fontFamilyFallback: const ['NotoEmoji']),
           ),
           textDirection: TextDirection.ltr,
         )..layout();
