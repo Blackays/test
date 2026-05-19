@@ -46,6 +46,7 @@ const List<MetaUpgrade> kMeta = [
   MetaUpgrade('spd', 'SWIFT PAWS', '+8 move speed per level', 6),
   MetaUpgrade('gold', 'TRUST FUND', '+15 starting obols per level', 5),
   MetaUpgrade('vis', 'FAR SIGHT', '+0.10 base view per level', 5),
+  MetaUpgrade('rev', 'NINE LIVES', '+1 Death Defiance per level', 3),
 ];
 
 class MetaStore {
@@ -878,6 +879,14 @@ class Player {
   int volleys = 1;
   WeaponDef weapon = kDefaultWeapon;
 
+  // Hades-style kit
+  int revives = 1 + MetaStore.lvlOf('rev'); // Death Defiance charges
+  double dashTimer = 0;
+  double dashCd = 1.5;
+  int zeus = 0; // chain-lightning jumps
+  double knockback = 0; // Poseidon
+  double doomAmt = 0; // Ares delayed burst
+
   double fireTimer = 0;
   double regen = 0;
   double hurtFlash = 0;
@@ -924,6 +933,9 @@ class Enemy {
   double dotTimer = 0;
   double dotDps = 0;
   double flash = 0;
+  double doomT = 0;
+  double doomAmt = 0;
+  bool elite = false;
 }
 
 class Bolt {
@@ -977,6 +989,12 @@ class Swing {
   double arc;
   bool thrust;
   double life = 0.18;
+}
+
+class Ghost {
+  Ghost(this.pos);
+  final Offset pos;
+  double life = 0.3;
 }
 
 class Trap {
@@ -1050,6 +1068,7 @@ class _GameScreenState extends State<GameScreen>
   final List<FloatText> _texts = [];
   final List<Door> _doors = [];
   final List<Swing> _swings = [];
+  final List<Ghost> _ghosts = [];
   final List<Trap> _traps = [];
   final List<Ballista> _ballistas = [];
 
@@ -1080,6 +1099,7 @@ class _GameScreenState extends State<GameScreen>
 
   Rect get _abilityRect =>
       Rect.fromLTWH(_size.width - 98, _size.height - 108, 78, 78);
+  Rect get _dashRect => Rect.fromLTWH(20, _size.height - 108, 72, 72);
   Rect get _pauseRect => Rect.fromLTWH(_size.width - 56, 84, 42, 42);
 
   @override
@@ -1106,6 +1126,7 @@ class _GameScreenState extends State<GameScreen>
     _texts.clear();
     _doors.clear();
     _swings.clear();
+    _ghosts.clear();
     _traps.clear();
     _ballistas.clear();
     _bossSpawned = false;
@@ -1201,6 +1222,11 @@ class _GameScreenState extends State<GameScreen>
     if (_p.invuln > 0) _p.invuln -= dt;
     if (_p.frenzy > 0) _p.frenzy -= dt;
     if (_p.abilityTimer > 0) _p.abilityTimer -= dt;
+    if (_p.dashTimer > 0) _p.dashTimer -= dt;
+    for (final g in _ghosts) {
+      g.life -= dt;
+    }
+    _ghosts.removeWhere((g) => g.life <= 0);
     if (_p.regen > 0) {
       _p.hp = (_p.hp + _p.regen * dt).clamp(0, _p.maxHp).toDouble();
     }
@@ -1362,6 +1388,16 @@ class _GameScreenState extends State<GameScreen>
         e.dotTimer -= dt;
         e.hp -= e.dotDps * dt;
       }
+      if (e.doomT > 0) {
+        e.doomT -= dt;
+        if (e.doomT <= 0 && e.doomAmt > 0) {
+          _bursts.add(Burst(e.pos, 36));
+          e.hp -= e.doomAmt;
+          _texts.add(FloatText(e.pos.translate(0, -e.radius), 'DOOM',
+              const Color(0xFFFF6BE0)));
+          e.doomAmt = 0;
+        }
+      }
       if (e.touchTimer > 0) e.touchTimer -= dt;
       if (e.flash > 0) e.flash -= dt;
       if (d < e.radius + _p.radius && e.touchTimer <= 0) {
@@ -1381,7 +1417,8 @@ class _GameScreenState extends State<GameScreen>
       for (final e in _enemies) {
         if (b.hit.contains(e)) continue;
         if ((b.pos - e.pos).distance < e.radius + 5) {
-          _damageEnemy(e, b.damage, b.crit);
+          _damageEnemy(e, b.damage, b.crit, b.pos);
+          _zeusChain(e, b.damage * 0.6);
           if (b.dot > 0) {
             e.dotDps = b.dot;
             e.dotTimer = 2.0;
@@ -1431,12 +1468,22 @@ class _GameScreenState extends State<GameScreen>
     _p.hurtFlash = 0.25;
     _shake = max(_shake, 7.0);
     if (_p.hp <= 0) {
+      if (_p.revives > 0) {
+        _p.revives--;
+        _p.hp = _p.maxHp * 0.5;
+        _p.invuln = 1.6;
+        _shake = max(_shake, 12.0);
+        _bursts.add(Burst(_p.pos, 140));
+        _texts.add(FloatText(_p.pos.translate(0, -_p.radius - 16),
+            'DEATH DEFIED', const Color(0xFFFFD45E)));
+        return;
+      }
       _p.hp = 0;
       _gameOver();
     }
   }
 
-  void _damageEnemy(Enemy e, double dmg, bool crit) {
+  void _damageEnemy(Enemy e, double dmg, bool crit, [Offset? from]) {
     e.hp -= dmg;
     e.flash = 0.1;
     _texts.add(FloatText(
@@ -1444,6 +1491,40 @@ class _GameScreenState extends State<GameScreen>
       crit ? '${dmg.toInt()}!' : '${dmg.toInt()}',
       crit ? const Color(0xFFFFE066) : Colors.white,
     ));
+    if (from != null && _p.knockback > 0) {
+      final v = e.pos - from;
+      final n = v.distance;
+      if (n > 0.01) {
+        e.pos = _slide(e.pos, v / n * _p.knockback, e.radius * 0.6);
+      }
+    }
+    if (_p.doomAmt > 0 && e.doomT <= 0) {
+      e.doomT = 1.0;
+      e.doomAmt = _p.doomAmt;
+    }
+  }
+
+  void _zeusChain(Enemy src, double dmg) {
+    if (_p.zeus <= 0) return;
+    final hit = <Enemy>{src};
+    var from = src;
+    for (var j = 0; j < _p.zeus; j++) {
+      Enemy? next;
+      var bd = 180.0 * 180.0;
+      for (final e in _enemies) {
+        if (hit.contains(e)) continue;
+        final d2 = (e.pos - from.pos).distanceSquared;
+        if (d2 < bd) {
+          bd = d2;
+          next = e;
+        }
+      }
+      if (next == null) break;
+      _texts.add(FloatText(next.pos, '⚡', const Color(0xFF8CD8FF)));
+      _damageEnemy(next, dmg, true);
+      hit.add(next);
+      from = next;
+    }
   }
 
   Enemy? _nearestEnemy(double maxRange) {
@@ -1480,7 +1561,9 @@ class _GameScreenState extends State<GameScreen>
       if (da < -pi) da += 2 * pi;
       if (da.abs() <= arc / 2) {
         final crit = _rng.nextDouble() < _p.critChance + 0.05;
-        _damageEnemy(e, _p.damage * w.dmgMul * (crit ? 2 : 1), crit);
+        _damageEnemy(
+            e, _p.damage * w.dmgMul * (crit ? 2 : 1), crit, _p.pos);
+        _zeusChain(e, _p.damage * w.dmgMul * 0.5);
         if (_p.dot > 0) {
           e.dotDps = _p.dot;
           e.dotTimer = 2.0;
@@ -1520,6 +1603,28 @@ class _GameScreenState extends State<GameScreen>
       _phase == Phase.playing &&
       _p.abilityTimer <= 0 &&
       _p.mp >= widget.def.abilityCost;
+
+  bool get _canDash =>
+      (_phase == Phase.playing || _phase == Phase.roomCleared) &&
+      _p.dashTimer <= 0;
+
+  void _dash() {
+    if (!_canDash) return;
+    final dir = _moveDir != Offset.zero ? _moveDir : _facing;
+    final n = dir.distance;
+    if (n < 0.01) return;
+    final unit = dir / n;
+    _p.dashTimer = _p.dashCd;
+    _p.invuln = max(_p.invuln, 0.32); // i-frames
+    const dist = 150.0;
+    for (var i = 0; i < 6; i++) {
+      _ghosts.add(Ghost(_p.pos));
+      _p.pos = _slide(_p.pos, unit * (dist / 6), _p.radius * 0.7);
+    }
+    _facing = unit;
+    _texts.add(FloatText(_p.pos.translate(0, -_p.radius - 14), 'DASH',
+        const Color(0xFF8CC8FF)));
+  }
 
   void _castAbility() {
     if (!_canCast) return;
@@ -1685,6 +1790,18 @@ class _GameScreenState extends State<GameScreen>
         bounty: 1,
         xp: _xpFor(0),
       ));
+    }
+    // elite: rare, beefier, glowing, worth much more
+    final e = _enemies.isNotEmpty ? _enemies.last : null;
+    if (e != null &&
+        e.kind != 3 &&
+        _rng.nextDouble() < 0.08 + _floorIdx * 0.015) {
+      e.elite = true;
+      e.hp *= 2.4;
+      e.damage *= 1.5;
+      e.radius *= 1.3;
+      e.bounty *= 4;
+      e.xp *= 3;
     }
   }
 
@@ -1884,6 +2001,7 @@ class _GameScreenState extends State<GameScreen>
   void _panStart(DragStartDetails d) {
     if (_phase != Phase.playing && _phase != Phase.roomCleared) return;
     if (_abilityRect.contains(d.localPosition)) return;
+    if (_dashRect.contains(d.localPosition)) return;
     if (_pauseRect.contains(d.localPosition)) return;
     _stickOn = true;
     _stickOrigin = d.localPosition;
@@ -1939,6 +2057,7 @@ class _GameScreenState extends State<GameScreen>
                       texts: _texts,
                       doors: _doors,
                       swings: _swings,
+                      ghosts: _ghosts,
                       traps: _traps,
                       ballistas: _ballistas,
                       map: _ready ? _map : null,
@@ -1957,6 +2076,7 @@ class _GameScreenState extends State<GameScreen>
                 ),
                 if (_ready) _hud(),
                 if (_ready && _phase == Phase.playing) _abilityButton(),
+                if (_ready && play) _dashButton(),
                 if (_ready && play) _pauseButton(),
                 if (_phase == Phase.roomCleared) _doorPanel(),
                 if (_phase == Phase.paused) _pauseOverlay(),
@@ -2020,6 +2140,43 @@ class _GameScreenState extends State<GameScreen>
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _dashButton() {
+    final ready = _p.dashTimer <= 0;
+    return Positioned(
+      left: _dashRect.left,
+      top: _dashRect.top,
+      width: _dashRect.width,
+      height: _dashRect.height,
+      child: GestureDetector(
+        onTap: _dash,
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color:
+                ready ? const Color(0xFF2E7D5B) : const Color(0xFF24242F),
+            border: Border.all(
+                color: ready ? const Color(0xFF8CFFC0) : Colors.white24,
+                width: 2),
+          ),
+          alignment: Alignment.center,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.bolt, color: Colors.white, size: 22),
+              Text(
+                ready ? 'DASH' : '${_p.dashTimer.toStringAsFixed(1)}s',
+                style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2177,7 +2334,9 @@ class _GameScreenState extends State<GameScreen>
               const SizedBox(height: 3),
               Align(
                 alignment: Alignment.centerLeft,
-                child: Text('🔫 ${_p.weapon.name}',
+                child: Text(
+                    '🔫 ${_p.weapon.name}    '
+                    '${'💀' * _p.revives.clamp(0, 6).toInt()}',
                     style: const TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
@@ -2408,6 +2567,15 @@ final List<Upgrade> kUpgrades = [
       (p) => p.pierce = (p.pierce + 2).clamp(0, 12).toInt()),
   Upgrade('EAGLE EYE', 'see way more of the room', 2,
       (p) => p.vision = (p.vision + 0.35).clamp(1.0, 2.8).toDouble()),
+  // god boons
+  Upgrade('POSEIDON: WAVE', 'hits knock enemies back', 1,
+      (p) => p.knockback += 26),
+  Upgrade('ATHENA: SWIFT', '-0.35s dash cooldown', 1,
+      (p) => p.dashCd = (p.dashCd - 0.35).clamp(0.4, 5).toDouble()),
+  Upgrade('ARES: DOOM', 'hits plant a delayed burst', 2,
+      (p) => p.doomAmt += 7),
+  Upgrade('ZEUS: CHAIN', 'attacks chain to +1 enemy', 2,
+      (p) => p.zeus += 1),
 ];
 
 class ShopItem {
@@ -2740,6 +2908,7 @@ class WorldPainter extends CustomPainter {
     required this.texts,
     required this.doors,
     required this.swings,
+    required this.ghosts,
     required this.traps,
     required this.ballistas,
     required this.map,
@@ -2764,6 +2933,7 @@ class WorldPainter extends CustomPainter {
   final List<FloatText> texts;
   final List<Door> doors;
   final List<Swing> swings;
+  final List<Ghost> ghosts;
   final List<Trap> traps;
   final List<Ballista> ballistas;
   final GameMap? map;
@@ -3021,6 +3191,16 @@ class WorldPainter extends CustomPainter {
             height: e.radius * 0.6),
         Paint()..color = const Color(0x3C000000),
       );
+      if (e.elite) {
+        final g = 0.5 + 0.5 * sin(time * 6 + e.pos.dx);
+        canvas.drawCircle(
+            e.pos,
+            e.radius + 7 + g * 4,
+            Paint()
+              ..color = const Color(0xFFFFE066).withValues(alpha: 0.35)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 3);
+      }
       if (e.kind == 3) {
         final aura = 0.5 + 0.5 * sin(time * 5);
         canvas.drawCircle(
@@ -3154,6 +3334,14 @@ class WorldPainter extends CustomPainter {
         final rect = Rect.fromCircle(center: s.pos, radius: s.reach);
         canvas.drawArc(rect, s.ang - s.arc / 2, s.arc, false, paint);
       }
+    }
+    for (final g in ghosts) {
+      final k = (g.life / 0.3).clamp(0.0, 1.0).toDouble();
+      canvas.drawCircle(
+          g.pos,
+          player.radius,
+          Paint()
+            ..color = const Color(0xFF8CC8FF).withValues(alpha: 0.28 * k));
     }
     _drawHero(canvas, player.pos, player.radius, player.def, player.buffStage,
         t: time, moving: moving, look: facing);
