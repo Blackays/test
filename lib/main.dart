@@ -3209,7 +3209,14 @@ class WorldPainter extends CustomPainter {
     canvas.translate(-cam.dx, -cam.dy);
 
     _paintMap(canvas, m);
-    _paintWorld(canvas);
+    final queue = <(double, void Function())>[];
+    void enqueue(double d, void Function() fn) => queue.add((d, fn));
+    _enqueueWalls(canvas, m, enqueue);
+    _paintWorld(canvas, enqueue);
+    queue.sort((a, b) => a.$1.compareTo(b.$1));
+    for (final item in queue) {
+      item.$2();
+    }
 
     canvas.restore();
 
@@ -3308,7 +3315,14 @@ class WorldPainter extends CustomPainter {
       }
     }
 
-    // wall pass: extruded blocks, back-to-front by (c + r)
+  }
+
+  // Walls are tall, so they participate in the depth-sorted pass with
+  // dynamic entities so a character standing in front of a wall draws on
+  // top of it and a character behind it is occluded.
+  void _enqueueWalls(Canvas canvas, GameMap m,
+      void Function(double depth, void Function() draw) add) {
+    final cell = m.cell;
     final sideR = Paint()..color = _shd(floor.prop, 0.32);
     final sideF = Paint()..color = _shd(floor.prop, 0.5);
     final topP = Paint()..color = floor.prop;
@@ -3321,49 +3335,52 @@ class WorldPainter extends CustomPainter {
       return Offset(s.dx, s.dy - lift);
     }
 
-    for (var s = 0; s <= (m.cols + m.rows - 2); s++) {
+    for (var r = 0; r < m.rows; r++) {
       for (var c = 0; c < m.cols; c++) {
-        final r = s - c;
-        if (r < 0 || r >= m.rows) continue;
         if (m.tt(c, r) != 0) continue;
         final play = m.tt(c - 1, r) > 0 ||
             m.tt(c + 1, r) > 0 ||
             m.tt(c, r - 1) > 0 ||
             m.tt(c, r + 1) > 0;
         final hsh = (c * 73 + r * 131) % 100;
+        final depth = c + r + 0.5;
         if (play) {
-          final x0 = c * cell, y0 = r * cell, x1 = x0 + cell, y1 = y0 + cell;
-          // front (+x) face
-          canvas.drawPath(
-              Path()
-                ..moveTo(pj(x1, y0, 0).dx, pj(x1, y0, 0).dy)
-                ..lineTo(pj(x1, y1, 0).dx, pj(x1, y1, 0).dy)
-                ..lineTo(pj(x1, y1, kWallH).dx, pj(x1, y1, kWallH).dy)
-                ..lineTo(pj(x1, y0, kWallH).dx, pj(x1, y0, kWallH).dy)
-                ..close(),
-              sideR);
-          // front (+y) face
-          canvas.drawPath(
-              Path()
-                ..moveTo(pj(x0, y1, 0).dx, pj(x0, y1, 0).dy)
-                ..lineTo(pj(x1, y1, 0).dx, pj(x1, y1, 0).dy)
-                ..lineTo(pj(x1, y1, kWallH).dx, pj(x1, y1, kWallH).dy)
-                ..lineTo(pj(x0, y1, kWallH).dx, pj(x0, y1, kWallH).dy)
-                ..close(),
-              sideF);
-          // top
-          final top = _tilePath(cell, c, r, kWallH);
-          canvas.drawPath(top, topP);
-          canvas.drawPath(top, topEdge);
-          if (hsh < 40) {
-            _projAt(canvas, Offset((c + 0.5) * cell, (r + 0.4) * cell), kWallH,
-                () => _drawProp(canvas, Offset((c + 0.5) * cell, (r + 0.4) * cell),
-                    cell, hsh % 5, floor));
-          }
+          add(depth, () {
+            final x0 = c * cell, y0 = r * cell, x1 = x0 + cell, y1 = y0 + cell;
+            canvas.drawPath(
+                Path()
+                  ..moveTo(pj(x1, y0, 0).dx, pj(x1, y0, 0).dy)
+                  ..lineTo(pj(x1, y1, 0).dx, pj(x1, y1, 0).dy)
+                  ..lineTo(pj(x1, y1, kWallH).dx, pj(x1, y1, kWallH).dy)
+                  ..lineTo(pj(x1, y0, kWallH).dx, pj(x1, y0, kWallH).dy)
+                  ..close(),
+                sideR);
+            canvas.drawPath(
+                Path()
+                  ..moveTo(pj(x0, y1, 0).dx, pj(x0, y1, 0).dy)
+                  ..lineTo(pj(x1, y1, 0).dx, pj(x1, y1, 0).dy)
+                  ..lineTo(pj(x1, y1, kWallH).dx, pj(x1, y1, kWallH).dy)
+                  ..lineTo(pj(x0, y1, kWallH).dx, pj(x0, y1, kWallH).dy)
+                  ..close(),
+                sideF);
+            final top = _tilePath(cell, c, r, kWallH);
+            canvas.drawPath(top, topP);
+            canvas.drawPath(top, topEdge);
+            if (hsh < 40) {
+              _projAt(canvas, Offset((c + 0.5) * cell, (r + 0.4) * cell),
+                  kWallH,
+                  () => _drawProp(canvas,
+                      Offset((c + 0.5) * cell, (r + 0.4) * cell),
+                      cell, hsh % 5, floor));
+            }
+          });
         } else if (hsh < 8) {
-          _projAt(canvas, Offset((c + 0.5) * cell, (r + 0.5) * cell), 0,
-              () => _drawProp(canvas, Offset((c + 0.5) * cell, (r + 0.5) * cell),
-                  cell, hsh % 5, floor));
+          add(depth, () {
+            _projAt(canvas, Offset((c + 0.5) * cell, (r + 0.5) * cell), 0,
+                () => _drawProp(canvas,
+                    Offset((c + 0.5) * cell, (r + 0.5) * cell),
+                    cell, hsh % 5, floor));
+          });
         }
       }
     }
@@ -3379,10 +3396,13 @@ class WorldPainter extends CustomPainter {
     canvas.restore();
   }
 
-  void _paintWorld(Canvas canvas) {
+  void _paintWorld(
+      Canvas canvas, void Function(double, void Function()) add) {
+    final cellSize = map!.cell;
+    double dep(Offset p) => (p.dx + p.dy) / cellSize;
     // traps
     for (final tr in traps) {
-      _projAt(canvas, tr.pos, 0, () {
+      add(dep(tr.pos), () => _projAt(canvas, tr.pos, 0, () {
       final col = tr.state == 1
           ? const Color(0xFFFF5C5C)
           : (tr.state == 2
@@ -3407,12 +3427,12 @@ class WorldPainter extends CustomPainter {
           tr.pos.translate(tr.r * 0.4, tr.r * 0.4), mp);
       canvas.drawLine(tr.pos.translate(tr.r * 0.4, -tr.r * 0.4),
           tr.pos.translate(-tr.r * 0.4, tr.r * 0.4), mp);
-      });
+      }));
     }
 
     // ballistas + their warning line
     for (final ba in ballistas) {
-      _projAt(canvas, ba.pos, 0, () {
+      add(dep(ba.pos), () => _projAt(canvas, ba.pos, 0, () {
       final dir = ba.vel.distance > 0
           ? ba.vel / ba.vel.distance
           : const Offset(1, 0);
@@ -3426,11 +3446,11 @@ class WorldPainter extends CustomPainter {
           Paint()
             ..color = const Color(0x33FF4D5E)
             ..strokeWidth = 2);
-      });
+      }));
     }
 
     for (final d in doors) {
-      _projAt(canvas, d.pos, 0, () {
+      add(dep(d.pos), () => _projAt(canvas, d.pos, 0, () {
       final pulse = 0.5 + 0.5 * sin(time * 4 + d.pos.dx);
       canvas.drawCircle(d.pos, d.r + 12,
           Paint()..color = const Color(0xFFFFD45E).withValues(alpha: 0.2));
@@ -3479,11 +3499,11 @@ class WorldPainter extends CustomPainter {
       )..layout(maxWidth: 180);
       lp.paint(canvas,
           Offset(d.pos.dx - lp.width / 2, d.pos.dy + d.r * 1.2 + 6));
-      });
+      }));
     }
 
     for (final b in bursts) {
-      _projAt(canvas, b.pos, 0, () {
+      add(dep(b.pos), () => _projAt(canvas, b.pos, 0, () {
       final double f = (b.t / 0.35).clamp(0.0, 1.0).toDouble();
       canvas.drawCircle(b.pos, b.maxR * f,
           Paint()..color = const Color(0xFFFF9A3C).withValues(alpha: (1 - f) * 0.22));
@@ -3494,24 +3514,21 @@ class WorldPainter extends CustomPainter {
             ..color = const Color(0xFFFFD45E).withValues(alpha: (1 - f) * 0.7)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 4);
-      });
+      }));
     }
 
     for (final o in orbs) {
-      _projAt(canvas, o.pos, 0, () {
+      add(dep(o.pos), () => _projAt(canvas, o.pos, 0, () {
       final pul = 0.5 + 0.5 * sin(time * 6 + o.pos.dx);
       canvas.drawCircle(o.pos, 11,
           Paint()..color = const Color(0xFF8CFF98).withValues(alpha: 0.22));
       canvas.drawCircle(
           o.pos, 4 + pul * 1.6, Paint()..color = const Color(0xFFB6FFC0));
-      });
+      }));
     }
 
-    final sortedEnemies = [...enemies]
-      ..sort((a, b) =>
-          (a.pos.dx + a.pos.dy).compareTo(b.pos.dx + b.pos.dy));
-    for (final e in sortedEnemies) {
-      _projAt(canvas, e.pos, 0, () {
+    for (final e in enemies) {
+      add(dep(e.pos), () => _projAt(canvas, e.pos, 0, () {
       final base = switch (e.kind) {
         1 => const Color(0xFFFF8A4C),
         2 => const Color(0xFF9B5CFF),
@@ -3616,11 +3633,11 @@ class WorldPainter extends CustomPainter {
             const Radius.circular(2)),
         Paint()..color = const Color(0xFF8CFF98),
       );
-      });
+      }));
     }
 
     for (final b in bolts) {
-      _projAt(canvas, b.pos, 0, () {
+      add(dep(b.pos), () => _projAt(canvas, b.pos, 0, () {
       final col = b.crit
           ? const Color(0xFFFFE066)
           : (b.splash > 0 ? const Color(0xFFFF9A3C) : Colors.white);
@@ -3628,17 +3645,17 @@ class WorldPainter extends CustomPainter {
       canvas.drawCircle(
           b.pos, cr + 4, Paint()..color = col.withValues(alpha: 0.3));
       canvas.drawCircle(b.pos, cr, Paint()..color = col);
-      });
+      }));
     }
     for (final e in ebolts) {
-      _projAt(canvas, e.pos, 0, () {
+      add(dep(e.pos), () => _projAt(canvas, e.pos, 0, () {
       canvas.drawCircle(e.pos, 9,
           Paint()..color = const Color(0xFFFF4D5E).withValues(alpha: 0.3));
       canvas.drawCircle(e.pos, 4.5, Paint()..color = const Color(0xFFFF6B79));
-      });
+      }));
     }
 
-    _projAt(canvas, player.pos, 0, () {
+    add(dep(player.pos), () => _projAt(canvas, player.pos, 0, () {
     if (player.invuln > 0) {
       canvas.drawCircle(
           player.pos,
@@ -3661,9 +3678,9 @@ class WorldPainter extends CustomPainter {
       canvas.drawCircle(player.pos, player.radius + 6,
           Paint()..color = const Color(0x55FF5C6C));
     }
-    });
+    }));
     for (final s in swings) {
-      _projAt(canvas, s.pos, 0, () {
+      add(dep(s.pos), () => _projAt(canvas, s.pos, 0, () {
       final k = (s.life / 0.18).clamp(0.0, 1.0).toDouble();
       final paint = Paint()
         ..color = Colors.white.withValues(alpha: 0.5 * k)
@@ -3677,26 +3694,28 @@ class WorldPainter extends CustomPainter {
         final rect = Rect.fromCircle(center: s.pos, radius: s.reach);
         canvas.drawArc(rect, s.ang - s.arc / 2, s.arc, false, paint);
       }
-      });
+      }));
     }
     for (final g in ghosts) {
-      _projAt(canvas, g.pos, 0, () {
+      add(dep(g.pos), () => _projAt(canvas, g.pos, 0, () {
       final k = (g.life / 0.3).clamp(0.0, 1.0).toDouble();
       canvas.drawCircle(
           g.pos,
           player.radius,
           Paint()
             ..color = const Color(0xFF8CC8FF).withValues(alpha: 0.28 * k));
-      });
+      }));
     }
-    _projAt(canvas, player.pos, 0, () {
-      _drawHero(canvas, player.pos, player.radius, player.def,
-          player.buffStage,
-          t: time, moving: moving, look: facing);
+    add(dep(player.pos), () {
+      _projAt(canvas, player.pos, 0, () {
+        _drawHero(canvas, player.pos, player.radius, player.def,
+            player.buffStage,
+            t: time, moving: moving, look: facing);
+      });
     });
 
     for (final tx in texts) {
-      _projAt(canvas, tx.pos, 0, () {
+      add(1e18, () => _projAt(canvas, tx.pos, 0, () {
       final a = tx.life.clamp(0.0, 1.0).toDouble();
       void dr(Color col, Offset at) {
         final tp = TextPainter(
@@ -3716,7 +3735,7 @@ class WorldPainter extends CustomPainter {
 
       dr(Colors.black, tx.pos.translate(1.4, 1.4));
       dr(tx.color, tx.pos);
-      });
+      }));
     }
   }
 
