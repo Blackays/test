@@ -279,6 +279,7 @@ class FloorDef {
     required this.grid,
     required this.mob,
     required this.prop,
+    required this.pool,
     required this.hpMul,
     required this.spdMul,
     required this.dmgMul,
@@ -290,6 +291,7 @@ class FloorDef {
   final Color grid;
   final Color mob;
   final Color prop;
+  final Color pool;
   final double hpMul;
   final double spdMul;
   final double dmgMul;
@@ -303,6 +305,7 @@ const List<FloorDef> kFloors = [
     grid: Color(0xFF2C4A36),
     mob: Color(0xFF7BC96F),
     prop: Color(0xFF2F5A3C),
+    pool: Color(0xFF2E6FB0),
     hpMul: 1.0,
     spdMul: 1.0,
     dmgMul: 1.0,
@@ -314,6 +317,7 @@ const List<FloorDef> kFloors = [
     grid: Color(0xFF255250),
     mob: Color(0xFF49C3B0),
     prop: Color(0xFF1F4A47),
+    pool: Color(0xFF3FA38C),
     hpMul: 1.5,
     spdMul: 1.08,
     dmgMul: 1.2,
@@ -325,6 +329,7 @@ const List<FloorDef> kFloors = [
     grid: Color(0xFF402F50),
     mob: Color(0xFFB05CCB),
     prop: Color(0xFF3C2C4C),
+    pool: Color(0xFF6E3FA0),
     hpMul: 2.2,
     spdMul: 1.16,
     dmgMul: 1.45,
@@ -336,6 +341,7 @@ const List<FloorDef> kFloors = [
     grid: Color(0xFF50432C),
     mob: Color(0xFFE0A046),
     prop: Color(0xFF4A3A22),
+    pool: Color(0xFFC8662A),
     hpMul: 3.1,
     spdMul: 1.24,
     dmgMul: 1.7,
@@ -347,6 +353,7 @@ const List<FloorDef> kFloors = [
     grid: Color(0xFF2E2E48),
     mob: Color(0xFFFF5C8A),
     prop: Color(0xFF262640),
+    pool: Color(0xFF7A3FC0),
     hpMul: 4.2,
     spdMul: 1.34,
     dmgMul: 2.0,
@@ -359,15 +366,17 @@ final int kMaxWaves = kFloors.length * kWavesPerFloor;
 /// ---------------------------------------------------------------------------
 /// Procedural map: rooms joined by corridors on a tile grid
 /// ---------------------------------------------------------------------------
+// tile codes: 0 = wall/void (blocks move + shots), 1 = floor,
+// 2 = pool (blocks move, shots pass over)
 class GameMap {
   GameMap(this.cols, this.rows, this.cell)
-      : floor = List<bool>.filled(cols * rows, false),
+      : tiles = List<int>.filled(cols * rows, 0),
         rooms = [];
 
   final int cols;
   final int rows;
   final double cell;
-  final List<bool> floor;
+  final List<int> tiles;
   final List<Rect> rooms; // tile coordinates
 
   double get worldW => cols * cell;
@@ -375,13 +384,15 @@ class GameMap {
   Size get size => Size(worldW, worldH);
 
   bool _in(int c, int r) => c >= 0 && r >= 0 && c < cols && r < rows;
-  bool tile(int c, int r) => _in(c, r) && floor[r * cols + c];
-  void carve(int c, int r) {
-    if (_in(c, r)) floor[r * cols + c] = true;
+  int tt(int c, int r) => _in(c, r) ? tiles[r * cols + c] : 0;
+  bool tile(int c, int r) => tt(c, r) == 1; // is floor
+  void set(int c, int r, int v) {
+    if (_in(c, r)) tiles[r * cols + c] = v;
   }
 
-  bool walkable(double x, double y) =>
-      tile((x / cell).floor(), (y / cell).floor());
+  int _ttAt(double x, double y) => tt((x / cell).floor(), (y / cell).floor());
+  bool walkable(double x, double y) => _ttAt(x, y) == 1;
+  bool blocksShot(double x, double y) => _ttAt(x, y) == 0;
 
   Offset roomCenter(int idx) {
     final rr = rooms[idx.clamp(0, rooms.length - 1).toInt()];
@@ -390,10 +401,12 @@ class GameMap {
   }
 
   Offset randomFloor(Random rng) {
-    for (var i = 0; i < 240; i++) {
+    for (var i = 0; i < 260; i++) {
       final c = rng.nextInt(cols);
       final r = rng.nextInt(rows);
-      if (floor[r * cols + c]) return Offset((c + 0.5) * cell, (r + 0.5) * cell);
+      if (tiles[r * cols + c] == 1) {
+        return Offset((c + 0.5) * cell, (r + 0.5) * cell);
+      }
     }
     return roomCenter(0);
   }
@@ -406,13 +419,13 @@ class GameMap {
     final roomCount = 5 + rng.nextInt(3) + wave ~/ 5;
     final centers = <Point<int>>[];
     for (var i = 0; i < roomCount; i++) {
-      final rw = 4 + rng.nextInt(6);
-      final rh = 4 + rng.nextInt(6);
+      final rw = 5 + rng.nextInt(6);
+      final rh = 5 + rng.nextInt(6);
       final rx = 2 + rng.nextInt(max(1, cols - rw - 4));
       final ry = 2 + rng.nextInt(max(1, rows - rh - 4));
       for (var c = rx; c < rx + rw; c++) {
         for (var r = ry; r < ry + rh; r++) {
-          m.carve(c, r);
+          m.set(c, r, 1);
         }
       }
       m.rooms.add(Rect.fromLTWH(
@@ -423,12 +436,45 @@ class GameMap {
       final a = centers[i - 1];
       final b = centers[i];
       for (var x = min(a.x, b.x); x <= max(a.x, b.x); x++) {
-        m.carve(x, a.y);
-        m.carve(x, a.y + 1);
+        m.set(x, a.y, 1);
+        m.set(x, a.y + 1, 1);
       }
       for (var y = min(a.y, b.y); y <= max(a.y, b.y); y++) {
-        m.carve(b.x, y);
-        m.carve(b.x + 1, y);
+        m.set(b.x, y, 1);
+        m.set(b.x + 1, y, 1);
+      }
+    }
+    // interior obstacles: wall pillars + pools (keep room centers clear,
+    // skip the start room so the player never spawns boxed in)
+    for (var ri = 1; ri < m.rooms.length; ri++) {
+      final rr = m.rooms[ri];
+      if (rr.width < 7 || rr.height < 7) continue;
+      final l = rr.left.toInt(), t = rr.top.toInt();
+      final w = rr.width.toInt(), h = rr.height.toInt();
+      final cc = l + w ~/ 2, cr = t + h ~/ 2;
+      if (rng.nextDouble() < 0.6) {
+        final pw = 2 + rng.nextInt(2);
+        final ph = 2 + rng.nextInt(2);
+        final px = l + 1 + rng.nextInt(max(1, w - pw - 2));
+        final py = t + 1 + rng.nextInt(max(1, h - ph - 2));
+        for (var c = px; c < px + pw; c++) {
+          for (var r = py; r < py + ph; r++) {
+            if (!(c == cc && r == cr)) m.set(c, r, 2);
+          }
+        }
+      }
+      if (rng.nextDouble() < 0.7) {
+        final horiz = rng.nextBool();
+        final len = 2 + rng.nextInt(3);
+        final wx = l + 1 + rng.nextInt(max(1, w - 3));
+        final wy = t + 1 + rng.nextInt(max(1, h - 3));
+        for (var k = 0; k < len; k++) {
+          final c = horiz ? wx + k : wx;
+          final r = horiz ? wy : wy + k;
+          if (!(c == cc && r == cr) && c < l + w - 1 && r < t + h - 1) {
+            m.set(c, r, 0);
+          }
+        }
       }
     }
     return m;
@@ -699,6 +745,47 @@ class _HeroCard extends StatelessWidget {
 }
 
 /// ---------------------------------------------------------------------------
+/// Weapons
+/// ---------------------------------------------------------------------------
+class WeaponDef {
+  const WeaponDef(this.name, this.desc,
+      {this.pellets = 1,
+      this.spread = 0,
+      this.dmgMul = 1,
+      this.rofMul = 1,
+      this.speedMul = 1,
+      this.pierceAdd = 0,
+      this.splashAdd = 0});
+  final String name;
+  final String desc;
+  final int pellets;
+  final double spread;
+  final double dmgMul;
+  final double rofMul;
+  final double speedMul;
+  final int pierceAdd;
+  final double splashAdd;
+}
+
+const WeaponDef kDefaultWeapon =
+    WeaponDef('SIDEARM', 'your trusty starter bonk');
+
+const List<WeaponDef> kWeapons = [
+  WeaponDef('SMG', 'fast, weak, slight spray',
+      pellets: 1, spread: 0.06, dmgMul: 0.62, rofMul: 0.45, speedMul: 1.1),
+  WeaponDef('SHOTGUN', '6 pellets, close range',
+      pellets: 6, spread: 0.55, dmgMul: 0.5, rofMul: 1.5, speedMul: 0.92),
+  WeaponDef('SNIPER', 'huge dmg, pierces, slow',
+      dmgMul: 3.4, rofMul: 2.0, speedMul: 1.9, pierceAdd: 4),
+  WeaponDef('CANNON', 'explosive lobs',
+      dmgMul: 2.2, rofMul: 1.7, speedMul: 0.8, splashAdd: 42),
+  WeaponDef('RIPPER', 'triple shred, pierces',
+      pellets: 3, spread: 0.22, dmgMul: 0.8, rofMul: 0.75, pierceAdd: 1),
+  WeaponDef('MINIGUN', 'brrrt of tiny bonks',
+      pellets: 1, spread: 0.10, dmgMul: 0.5, rofMul: 0.28, speedMul: 1.15),
+];
+
+/// ---------------------------------------------------------------------------
 /// Entities
 /// ---------------------------------------------------------------------------
 class Player {
@@ -744,6 +831,7 @@ class Player {
   double thorns;
   double vision;
   int volleys = 1;
+  WeaponDef weapon = kDefaultWeapon;
 
   double fireTimer = 0;
   double regen = 0;
@@ -1052,7 +1140,7 @@ class _GameScreenState extends State<GameScreen>
       final t = _nearestEnemy(_p.range);
       if (t != null) {
         _fireAt(t.pos - _p.pos);
-        _p.fireTimer = _p.effFire;
+        _p.fireTimer = _p.effFire * _p.weapon.rofMul;
         if (_p.volleys > 1) {
           _p.volleyLeft = _p.volleys - 1;
           _p.volleyTimer = 0.10;
@@ -1073,7 +1161,8 @@ class _GameScreenState extends State<GameScreen>
       b.pos += b.vel * dt;
       b.life -= dt;
     }
-    _bolts.removeWhere((b) => b.life <= 0 || !_map.walkable(b.pos.dx, b.pos.dy));
+    _bolts.removeWhere(
+        (b) => b.life <= 0 || _map.blocksShot(b.pos.dx, b.pos.dy));
 
     for (final e in _ebolts) {
       e.pos += e.vel * dt;
@@ -1085,7 +1174,7 @@ class _GameScreenState extends State<GameScreen>
       }
     }
     _ebolts.removeWhere(
-        (e) => e.life <= 0 || !_map.walkable(e.pos.dx, e.pos.dy));
+        (e) => e.life <= 0 || _map.blocksShot(e.pos.dx, e.pos.dy));
 
     for (final e in _enemies) {
       final dir = _p.pos - e.pos;
@@ -1210,21 +1299,27 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _fireAt(Offset aim) {
+    final w = _p.weapon;
     final baseAng = atan2(aim.dy, aim.dx);
-    final n = _p.projectiles;
-    final spread = n > 1 ? 0.16 : 0.0;
+    final n = w.pellets + (_p.projectiles - 1);
+    final spread = w.spread > 0
+        ? w.spread
+        : (n > 1 ? 0.16 : 0.0);
+    final speed = _p.projSpeed * w.speedMul;
+    final pierce = _p.pierce + w.pierceAdd;
+    final splash = _p.splash + w.splashAdd;
     for (var i = 0; i < n; i++) {
-      final off = (i - (n - 1) / 2) * spread;
+      final off = n > 1 ? (i / (n - 1) - 0.5) * spread : 0.0;
       final ang = baseAng + off;
       final crit = _rng.nextDouble() < _p.critChance;
-      final dmg = _p.damage * (crit ? 2 : 1);
+      final dmg = _p.damage * w.dmgMul * (crit ? 2 : 1);
       _bolts.add(Bolt(
         _p.pos,
-        Offset(cos(ang), sin(ang)) * _p.projSpeed,
+        Offset(cos(ang), sin(ang)) * speed,
         dmg,
         crit,
-        _p.pierce,
-        _p.splash,
+        pierce,
+        splash,
         _p.dot,
       ));
     }
@@ -1477,7 +1572,10 @@ class _GameScreenState extends State<GameScreen>
 
   List<DoorDef> _rollDoorDefs() {
     final fi = _floorIdx;
+    final gun = kWeapons[_rng.nextInt(kWeapons.length)];
     final pool = <DoorDef>[
+      DoorDef('🔫', 'ARMORY: ${gun.name}', gun.desc, DoorKind.reward,
+          (p) => p.weapon = gun),
       DoorDef('💰', 'TREASURE', '+${12 + fi * 8} obols', DoorKind.reward,
           (p) => p.obols += 12 + fi * 8),
       DoorDef('❤', 'FOUNTAIN', 'heal 45% + 50% MP', DoorKind.reward, (p) {
@@ -1566,7 +1664,12 @@ class _GameScreenState extends State<GameScreen>
       ShopItem('+0.3 LIFESTEAL', 'heal on kill', price(18),
           (p) => p.lifesteal += 0.3),
     ]..shuffle(_rng);
-    return all.take(6).toList();
+    final gun = kWeapons[_rng.nextInt(kWeapons.length)];
+    return [
+      ShopItem('WEAPON: ${gun.name}', gun.desc, price(22),
+          (p) => p.weapon = gun),
+      ...all.take(5),
+    ];
   }
 
   void _buy(ShopItem it) {
@@ -1874,6 +1977,15 @@ class _GameScreenState extends State<GameScreen>
                   'MP ${_p.mp.floor()}/${_p.maxMp.toInt()}', h: 12),
               const SizedBox(height: 3),
               _bar(_p.xp / _p.xpToNext, const Color(0xFF8CFF98), null, h: 6),
+              const SizedBox(height: 3),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('🔫 ${_p.weapon.name}',
+                    style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFFFFD45E))),
+              ),
             ],
           ),
         ),
@@ -2544,28 +2656,55 @@ class WorldPainter extends CustomPainter {
 
     for (var r = 0; r < m.rows; r++) {
       for (var c = 0; c < m.cols; c++) {
-        final isFloor = m.tile(c, r);
+        final t = m.tt(c, r);
         final rect = Rect.fromLTWH(c * cell, r * cell, cell, cell);
-        if (isFloor) {
+        if (t == 1) {
           canvas.drawRect(rect, floorPaint);
           canvas.drawRect(rect.deflate(0.5), edge);
+        } else if (t == 2) {
+          // pool: shoot across, can't walk
+          canvas.drawRect(rect, Paint()..color = _shd(floor.bg, 0.18));
+          final sh = 0.5 + 0.5 * sin(time * 2 + c * 0.7 + r * 0.5);
+          canvas.drawRect(rect.deflate(2), Paint()..color = floor.pool);
+          canvas.drawRect(
+              rect.deflate(2),
+              Paint()
+                ..color = _lit(floor.pool, 0.22 * sh).withValues(alpha: 0.5));
+          canvas.drawRect(
+              rect.deflate(1.5),
+              Paint()
+                ..color = _shd(floor.pool, 0.35)
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 1.5);
         } else {
-          // prop on wall tiles that border the floor (frames the rooms)
-          final border = m.tile(c - 1, r) ||
-              m.tile(c + 1, r) ||
-              m.tile(c, r - 1) ||
-              m.tile(c, r + 1);
+          final play = m.tt(c - 1, r) > 0 ||
+              m.tt(c + 1, r) > 0 ||
+              m.tt(c, r - 1) > 0 ||
+              m.tt(c, r + 1) > 0;
           final h = (c * 73 + r * 131) % 100;
-          if (border && h < 78) {
-            _drawProp(
-                canvas,
-                Offset((c + 0.5) * cell, (r + 0.5) * cell),
-                cell,
-                h % 5,
-                floor);
-          } else if (!border && h < 8) {
+          if (play) {
+            // solid impassable wall block (also blocks shots)
+            final rr = RRect.fromRectAndRadius(
+                rect.deflate(1.5), const Radius.circular(5));
+            canvas.drawRRect(rr, Paint()..color = _shd(floor.prop, 0.2));
+            canvas.drawRRect(
+                RRect.fromRectAndRadius(
+                    rect.deflate(1.5).translate(0, -cell * 0.12),
+                    const Radius.circular(5)),
+                Paint()..color = floor.prop);
+            canvas.drawRRect(
+                rr,
+                Paint()
+                  ..color = _shd(floor.prop, 0.45)
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = 2);
+            if (h < 40) {
+              _drawProp(canvas, Offset((c + 0.5) * cell, (r + 0.4) * cell),
+                  cell, h % 5, floor);
+            }
+          } else if (h < 8) {
             _drawProp(canvas, Offset((c + 0.5) * cell, (r + 0.5) * cell),
-                cell, 1, floor);
+                cell, h % 5, floor);
           }
         }
       }
