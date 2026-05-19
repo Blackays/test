@@ -87,6 +87,38 @@ class MetaStore {
 }
 
 /// ---------------------------------------------------------------------------
+/// Keepsakes + Heat (run loadout)
+/// ---------------------------------------------------------------------------
+class Keepsake {
+  const Keepsake(this.name, this.desc, this.apply);
+  final String name;
+  final String desc;
+  final void Function(Player p) apply;
+}
+
+final List<Keepsake> kKeepsakes = [
+  Keepsake('OLD COLLAR', '+5 max HP', (p) {
+    p.maxHp += 5;
+    p.hp += 5;
+  }),
+  Keepsake('LUCKY TOOTH', '+1 Death Defiance', (p) => p.revives += 1),
+  Keepsake('SHADOW SANDALS', '-0.4s dash cooldown',
+      (p) => p.dashCd = (p.dashCd - 0.4).clamp(0.4, 5).toDouble()),
+  Keepsake('THUNDER SIGNET', 'start with Zeus chain',
+      (p) => p.zeus += 1),
+  Keepsake('PIERCED HEART', '+8% crit chance',
+      (p) => p.critChance += 0.08),
+  Keepsake('LAMBENT PLUME', '+22 move speed', (p) => p.speed += 22),
+];
+
+class Loadout {
+  static Keepsake? keepsake;
+  static int heat = 0; // Pact of Punishment-style difficulty
+  static double get enemyMul => 1 + heat * 0.12;
+  static double get rewardMul => 1 + heat * 0.25;
+}
+
+/// ---------------------------------------------------------------------------
 /// Classes
 /// ---------------------------------------------------------------------------
 enum HeroClass { tank, archer, mage, warlock, assassin, gunner }
@@ -364,6 +396,14 @@ const List<FloorDef> kFloors = [
 const int kWavesPerFloor = 5;
 final int kMaxWaves = kFloors.length * kWavesPerFloor;
 
+const List<String> kBossNames = [
+  'CHOMPER, THE BACKYARD KING',
+  'GLOOP, SEWER TYRANT',
+  'CRYSTALMAW OF THE CAVES',
+  'OVERSEER UNIT 9000',
+  'NULL, THE VOID DEVOURER',
+];
+
 /// ---------------------------------------------------------------------------
 /// Procedural map: rooms joined by corridors on a tile grid
 /// ---------------------------------------------------------------------------
@@ -537,6 +577,32 @@ class _TitleScreenState extends State<TitleScreen> {
               },
             ),
             const SizedBox(height: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.remove_circle_outline),
+                  color: Colors.white70,
+                  onPressed: () => setState(() => Loadout.heat =
+                      (Loadout.heat - 1).clamp(0, 10).toInt()),
+                ),
+                Text('🔥 HEAT ${Loadout.heat}',
+                    style: const TextStyle(
+                        color: Color(0xFFFF8A4C),
+                        fontWeight: FontWeight.w900)),
+                IconButton(
+                  icon: const Icon(Icons.add_circle_outline),
+                  color: Colors.white70,
+                  onPressed: () => setState(() => Loadout.heat =
+                      (Loadout.heat + 1).clamp(0, 10).toInt()),
+                ),
+              ],
+            ),
+            Text(
+                'enemies ×${Loadout.enemyMul.toStringAsFixed(2)}  ·  '
+                'shards ×${Loadout.rewardMul.toStringAsFixed(2)}',
+                style: const TextStyle(color: Colors.white38, fontSize: 11)),
+            const SizedBox(height: 12),
             Text('🔷 ${MetaStore.shards} shards',
                 style: const TextStyle(color: Color(0xFF8CC8FF))),
             if (GameStats.bestWave > 0)
@@ -686,8 +752,8 @@ class _HeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       borderRadius: BorderRadius.circular(18),
-      onTap: () => Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(builder: (_) => GameScreen(def: def))),
+      onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => KeepsakeScreen(def: def))),
       child: Container(
         decoration: BoxDecoration(
           color: const Color(0xFF1F1D2E),
@@ -751,6 +817,77 @@ class _HeroCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// ---------------------------------------------------------------------------
+/// Keepsake select
+/// ---------------------------------------------------------------------------
+class KeepsakeScreen extends StatelessWidget {
+  const KeepsakeScreen({super.key, required this.def});
+  final HeroDef def;
+
+  @override
+  Widget build(BuildContext context) {
+    void go() => Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => GameScreen(def: def)));
+    return Scaffold(
+      appBar: AppBar(title: const Text('EQUIP A KEEPSAKE')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () {
+              Loadout.keepsake = null;
+              go();
+            },
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1F1D2E),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: const Text('NO KEEPSAKE',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w900, color: Colors.white)),
+            ),
+          ),
+          for (final k in kKeepsakes)
+            InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () {
+                Loadout.keepsake = k;
+                go();
+              },
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1F1D2E),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFF8CC8FF)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(k.name,
+                        style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF8CC8FF))),
+                    Text(k.desc,
+                        style: const TextStyle(
+                            color: Colors.white60, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1173,6 +1310,7 @@ class _GameScreenState extends State<GameScreen>
 
   void _initRun() {
     _p = Player(widget.def);
+    Loadout.keepsake?.apply(_p);
     _wave = 1;
     _shake = 0;
     _boonThenNext = false;
@@ -1734,9 +1872,9 @@ class _GameScreenState extends State<GameScreen>
       _bossSpawned = true;
       _enemies.add(Enemy(
         pos: p,
-        hp: (26 + _wave * 5) * f.hpMul,
+        hp: (26 + _wave * 5) * f.hpMul * Loadout.enemyMul,
         speed: (44 + _wave * 1.2) * f.spdMul,
-        damage: 2.5 * f.dmgMul,
+        damage: 2.5 * f.dmgMul * Loadout.enemyMul,
         radius: 36,
         kind: 3,
         bounty: 25,
@@ -1793,15 +1931,20 @@ class _GameScreenState extends State<GameScreen>
     }
     // elite: rare, beefier, glowing, worth much more
     final e = _enemies.isNotEmpty ? _enemies.last : null;
-    if (e != null &&
-        e.kind != 3 &&
-        _rng.nextDouble() < 0.08 + _floorIdx * 0.015) {
-      e.elite = true;
-      e.hp *= 2.4;
-      e.damage *= 1.5;
-      e.radius *= 1.3;
-      e.bounty *= 4;
-      e.xp *= 3;
+    if (e != null) {
+      if (e.kind != 3 && _rng.nextDouble() < 0.08 + _floorIdx * 0.015) {
+        e.elite = true;
+        e.hp *= 2.4;
+        e.damage *= 1.5;
+        e.radius *= 1.3;
+        e.bounty *= 4;
+        e.xp *= 3;
+      }
+      if (Loadout.heat > 0) {
+        e.hp *= Loadout.enemyMul;
+        e.damage *= Loadout.enemyMul;
+        e.speed *= 1 + Loadout.heat * 0.03;
+      }
     }
   }
 
@@ -1898,8 +2041,35 @@ class _GameScreenState extends State<GameScreen>
           (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt()),
       DoorDef('👁', 'WATCHTOWER', '+0.2 view', DoorKind.reward,
           (p) => p.vision = (p.vision + 0.2).clamp(1.0, 2.6).toDouble()),
+      _chaosDoor(),
     ]..shuffle(_rng);
     return pool.take(n.clamp(2, pool.length).toInt()).toList();
+  }
+
+  DoorDef _chaosDoor() {
+    // Chaos: a real cost, then a strong permanent gift
+    final pairs = <List<dynamic>>[
+      ['-15% max HP, but +2 damage', (Player p) {
+        p.maxHp = (p.maxHp * 0.85);
+        p.hp = p.hp.clamp(1, p.maxHp).toDouble();
+        p.damage += 2;
+      }],
+      ['-20 speed, but +3 pierce', (Player p) {
+        p.speed = (p.speed - 20).clamp(60, 999).toDouble();
+        p.pierce += 3;
+      }],
+      ['lose all obols, but +1 Death Defiance', (Player p) {
+        p.obols = 0;
+        p.revives += 1;
+      }],
+      ['-25% fire rate, but +1 projectile', (Player p) {
+        p.fireInterval *= 1.25;
+        p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt();
+      }],
+    ];
+    final c = pairs[_rng.nextInt(pairs.length)];
+    return DoorDef('🌀', 'CHAOS', c[0] as String, DoorKind.reward,
+        c[1] as void Function(Player));
   }
 
   void _enterDoor(Door d) {
@@ -1940,7 +2110,9 @@ class _GameScreenState extends State<GameScreen>
 
   int _lastGain = 0;
   void _awardShards() {
-    _lastGain = _wave * 2 + _p.kills ~/ 8 + _floorIdx * 4;
+    _lastGain =
+        ((_wave * 2 + _p.kills ~/ 8 + _floorIdx * 4) * Loadout.rewardMul)
+            .round();
     MetaStore.shards += _lastGain;
     MetaStore.save();
   }
@@ -2075,6 +2247,7 @@ class _GameScreenState extends State<GameScreen>
                   ),
                 ),
                 if (_ready) _hud(),
+                if (_ready) _bossBar(),
                 if (_ready && _phase == Phase.playing) _abilityButton(),
                 if (_ready && play) _dashButton(),
                 if (_ready && play) _pauseButton(),
@@ -2274,6 +2447,50 @@ class _GameScreenState extends State<GameScreen>
         ),
       ],
     ));
+  }
+
+  Widget _bossBar() {
+    Enemy? boss;
+    for (final e in _enemies) {
+      if (e.kind == 3) {
+        boss = e;
+        break;
+      }
+    }
+    if (boss == null) return const SizedBox.shrink();
+    final frac = (boss.hp / boss.maxHp).clamp(0.0, 1.0).toDouble();
+    return Positioned(
+      top: 134,
+      left: 30,
+      right: 30,
+      child: Column(
+        children: [
+          Text('☠ ${kBossNames[_floorIdx]} ☠',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Color(0xFFFF3B5C),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13)),
+          const SizedBox(height: 3),
+          Container(
+            height: 12,
+            decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFF3B5C))),
+            child: FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: frac,
+              child: Container(
+                decoration: BoxDecoration(
+                    color: const Color(0xFFFF3B5C),
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _hud() {
