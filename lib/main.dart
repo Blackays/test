@@ -2207,7 +2207,11 @@ class _GameScreenState extends State<GameScreen>
       delta = delta / delta.distance * _stickR;
     }
     _stickKnob = _stickOrigin + delta;
-    _moveDir = delta / _stickR;
+    final screen = delta / _stickR; // intended on-screen direction
+    final world = isoUnproject(screen);
+    _moveDir = world == Offset.zero
+        ? Offset.zero
+        : world / world.distance * screen.distance;
   }
 
   void _panEnd(_) {
@@ -2272,7 +2276,6 @@ class _GameScreenState extends State<GameScreen>
                 if (_ready && _phase == Phase.playing) _abilityButton(),
                 if (_ready && play) _dashButton(),
                 if (_ready && play) _pauseButton(),
-                if (_phase == Phase.roomCleared) _doorPanel(),
                 if (_phase == Phase.paused) _pauseOverlay(),
                 if (_phase == Phase.levelUp) _levelUpOverlay(),
                 if (_phase == Phase.shop) _shopOverlay(),
@@ -2286,59 +2289,6 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
-  Widget _doorPanel() {
-    return Positioned(
-      left: 12,
-      right: 12,
-      bottom: 26,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('ROOM CLEAR · walk into a door',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 14)),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              for (final dr in _doors)
-                Expanded(
-                  child: Container(
-                    constraints: const BoxConstraints(maxWidth: 200),
-                    margin: const EdgeInsets.symmetric(horizontal: 6),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xCC1F1D2E),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                          color: const Color(0xFFFFD45E), width: 1.5),
-                    ),
-                    child: Column(
-                      children: [
-                        Text(dr.def.icon,
-                            style: const TextStyle(fontSize: 22)),
-                        Text(dr.def.title,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                                color: Color(0xFFFFD45E),
-                                fontWeight: FontWeight.w900,
-                                fontSize: 12)),
-                        Text(dr.def.desc,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                                color: Colors.white60, fontSize: 10)),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _dashButton() {
     final ready = _p.dashTimer <= 0;
@@ -2908,6 +2858,17 @@ class _BigButton extends StatelessWidget {
 Color _lit(Color c, double a) => Color.lerp(c, Colors.white, a)!;
 Color _shd(Color c, double a) => Color.lerp(c, Colors.black, a)!;
 
+// Isometric (Hades-style 3/4) projection. Gameplay stays in world space;
+// only rendering and the joystick input are projected through this basis.
+const double kIsoSX = 0.70;
+const double kIsoSY = 0.35;
+const double kWallH = 30.0; // extruded wall height in screen units
+Offset isoProject(Offset w) =>
+    Offset((w.dx - w.dy) * kIsoSX, (w.dx + w.dy) * kIsoSY);
+Offset isoUnproject(Offset s) => Offset(
+    (s.dx / kIsoSX + s.dy / kIsoSY) / 2,
+    (s.dy / kIsoSY - s.dx / kIsoSX) / 2);
+
 void _drawHero(Canvas canvas, Offset base, double r, HeroDef def, int stage,
     {double t = 0, bool moving = false, Offset look = Offset.zero}) {
   canvas.drawOval(
@@ -3195,19 +3156,10 @@ class WorldPainter extends CustomPainter {
     final m = map;
     if (!ready || m == null) return;
 
-    final aw = m.worldW, ah = m.worldH;
-    final fit = min(size.width / aw, size.height / ah);
     final z = (1.0 / (player.vision <= 0 ? 1.0 : player.vision))
-        .clamp(fit, 1.25)
+        .clamp(0.6, 1.2)
         .toDouble();
-    final hvw = size.width / (2 * z);
-    final hvh = size.height / (2 * z);
-    final cx = aw <= 2 * hvw
-        ? aw / 2
-        : player.pos.dx.clamp(hvw, aw - hvw).toDouble();
-    final cy = ah <= 2 * hvh
-        ? ah / 2
-        : player.pos.dy.clamp(hvh, ah - hvh).toDouble();
+    final cam = isoProject(player.pos); // follow-cam on the projected player
 
     canvas.save();
     canvas.translate(size.width / 2, size.height / 2);
@@ -3215,7 +3167,7 @@ class WorldPainter extends CustomPainter {
     if (shake > 0) {
       canvas.translate(sin(time * 97) * shake, cos(time * 89) * shake);
     }
-    canvas.translate(-cx, -cy);
+    canvas.translate(-cam.dx, -cam.dy);
 
     _paintMap(canvas, m);
     _paintWorld(canvas);
@@ -3255,11 +3207,35 @@ class WorldPainter extends CustomPainter {
     }
   }
 
+  // 4 projected corners of tile (c,r), optionally lifted up-screen.
+  Path _tilePath(double cell, int c, int r, [double lift = 0]) {
+    final x0 = c * cell, y0 = r * cell, x1 = x0 + cell, y1 = y0 + cell;
+    Offset p(double x, double y) {
+      final s = isoProject(Offset(x, y));
+      return Offset(s.dx, s.dy - lift);
+    }
+
+    final a = p(x0, y0), b = p(x1, y0), d = p(x1, y1), e = p(x0, y1);
+    return Path()
+      ..moveTo(a.dx, a.dy)
+      ..lineTo(b.dx, b.dy)
+      ..lineTo(d.dx, d.dy)
+      ..lineTo(e.dx, e.dy)
+      ..close();
+  }
+
   void _paintMap(Canvas canvas, GameMap m) {
     final cell = m.cell;
-    // void backdrop
-    canvas.drawRect(Rect.fromLTWH(0, 0, m.worldW, m.worldH),
-        Paint()..color = floor.voidc);
+    final w = m.worldW, h = m.worldH;
+    // void backdrop = the projected map diamond
+    final back = Path()
+      ..addPolygon([
+        isoProject(const Offset(0, 0)),
+        isoProject(Offset(w, 0)),
+        isoProject(Offset(w, h)),
+        isoProject(Offset(0, h)),
+      ], true);
+    canvas.drawPath(back, Paint()..color = floor.voidc);
 
     final floorPaint = Paint()..color = floor.bg;
     final edge = Paint()
@@ -3267,66 +3243,107 @@ class WorldPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
 
+    // ground pass: floor + pools (coplanar, any order)
     for (var r = 0; r < m.rows; r++) {
       for (var c = 0; c < m.cols; c++) {
         final t = m.tt(c, r);
-        final rect = Rect.fromLTWH(c * cell, r * cell, cell, cell);
         if (t == 1) {
-          canvas.drawRect(rect, floorPaint);
-          canvas.drawRect(rect.deflate(0.5), edge);
+          final pth = _tilePath(cell, c, r);
+          canvas.drawPath(pth, floorPaint);
+          canvas.drawPath(pth, edge);
         } else if (t == 2) {
-          // pool: shoot across, can't walk
-          canvas.drawRect(rect, Paint()..color = _shd(floor.bg, 0.18));
           final sh = 0.5 + 0.5 * sin(time * 2 + c * 0.7 + r * 0.5);
-          canvas.drawRect(rect.deflate(2), Paint()..color = floor.pool);
-          canvas.drawRect(
-              rect.deflate(2),
+          final pth = _tilePath(cell, c, r);
+          canvas.drawPath(pth, Paint()..color = floor.pool);
+          canvas.drawPath(
+              pth,
               Paint()
                 ..color = _lit(floor.pool, 0.22 * sh).withValues(alpha: 0.5));
-          canvas.drawRect(
-              rect.deflate(1.5),
+          canvas.drawPath(
+              pth,
               Paint()
                 ..color = _shd(floor.pool, 0.35)
                 ..style = PaintingStyle.stroke
                 ..strokeWidth = 1.5);
-        } else {
-          final play = m.tt(c - 1, r) > 0 ||
-              m.tt(c + 1, r) > 0 ||
-              m.tt(c, r - 1) > 0 ||
-              m.tt(c, r + 1) > 0;
-          final h = (c * 73 + r * 131) % 100;
-          if (play) {
-            // solid impassable wall block (also blocks shots)
-            final rr = RRect.fromRectAndRadius(
-                rect.deflate(1.5), const Radius.circular(5));
-            canvas.drawRRect(rr, Paint()..color = _shd(floor.prop, 0.2));
-            canvas.drawRRect(
-                RRect.fromRectAndRadius(
-                    rect.deflate(1.5).translate(0, -cell * 0.12),
-                    const Radius.circular(5)),
-                Paint()..color = floor.prop);
-            canvas.drawRRect(
-                rr,
-                Paint()
-                  ..color = _shd(floor.prop, 0.45)
-                  ..style = PaintingStyle.stroke
-                  ..strokeWidth = 2);
-            if (h < 40) {
-              _drawProp(canvas, Offset((c + 0.5) * cell, (r + 0.4) * cell),
-                  cell, h % 5, floor);
-            }
-          } else if (h < 8) {
-            _drawProp(canvas, Offset((c + 0.5) * cell, (r + 0.5) * cell),
-                cell, h % 5, floor);
+        }
+      }
+    }
+
+    // wall pass: extruded blocks, back-to-front by (c + r)
+    final sideR = Paint()..color = _shd(floor.prop, 0.32);
+    final sideF = Paint()..color = _shd(floor.prop, 0.5);
+    final topP = Paint()..color = floor.prop;
+    final topEdge = Paint()
+      ..color = _shd(floor.prop, 0.5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    Offset pj(double x, double y, double lift) {
+      final s = isoProject(Offset(x, y));
+      return Offset(s.dx, s.dy - lift);
+    }
+
+    for (var s = 0; s <= (m.cols + m.rows - 2); s++) {
+      for (var c = 0; c < m.cols; c++) {
+        final r = s - c;
+        if (r < 0 || r >= m.rows) continue;
+        if (m.tt(c, r) != 0) continue;
+        final play = m.tt(c - 1, r) > 0 ||
+            m.tt(c + 1, r) > 0 ||
+            m.tt(c, r - 1) > 0 ||
+            m.tt(c, r + 1) > 0;
+        final hsh = (c * 73 + r * 131) % 100;
+        if (play) {
+          final x0 = c * cell, y0 = r * cell, x1 = x0 + cell, y1 = y0 + cell;
+          // front (+x) face
+          canvas.drawPath(
+              Path()
+                ..moveTo(pj(x1, y0, 0).dx, pj(x1, y0, 0).dy)
+                ..lineTo(pj(x1, y1, 0).dx, pj(x1, y1, 0).dy)
+                ..lineTo(pj(x1, y1, kWallH).dx, pj(x1, y1, kWallH).dy)
+                ..lineTo(pj(x1, y0, kWallH).dx, pj(x1, y0, kWallH).dy)
+                ..close(),
+              sideR);
+          // front (+y) face
+          canvas.drawPath(
+              Path()
+                ..moveTo(pj(x0, y1, 0).dx, pj(x0, y1, 0).dy)
+                ..lineTo(pj(x1, y1, 0).dx, pj(x1, y1, 0).dy)
+                ..lineTo(pj(x1, y1, kWallH).dx, pj(x1, y1, kWallH).dy)
+                ..lineTo(pj(x0, y1, kWallH).dx, pj(x0, y1, kWallH).dy)
+                ..close(),
+              sideF);
+          // top
+          final top = _tilePath(cell, c, r, kWallH);
+          canvas.drawPath(top, topP);
+          canvas.drawPath(top, topEdge);
+          if (hsh < 40) {
+            _projAt(canvas, Offset((c + 0.5) * cell, (r + 0.4) * cell), kWallH,
+                () => _drawProp(canvas, Offset((c + 0.5) * cell, (r + 0.4) * cell),
+                    cell, hsh % 5, floor));
           }
+        } else if (hsh < 8) {
+          _projAt(canvas, Offset((c + 0.5) * cell, (r + 0.5) * cell), 0,
+              () => _drawProp(canvas, Offset((c + 0.5) * cell, (r + 0.5) * cell),
+                  cell, hsh % 5, floor));
         }
       }
     }
   }
 
+  // Run [draw] (which paints around [anchor] in world coords) so that it lands
+  // at the projected, optionally lifted, screen position — body stays upright.
+  void _projAt(Canvas canvas, Offset anchor, double lift, void Function() draw) {
+    final s = isoProject(anchor);
+    canvas.save();
+    canvas.translate(s.dx - anchor.dx, s.dy - anchor.dy - lift);
+    draw();
+    canvas.restore();
+  }
+
   void _paintWorld(Canvas canvas) {
     // traps
     for (final tr in traps) {
+      _projAt(canvas, tr.pos, 0, () {
       final col = tr.state == 1
           ? const Color(0xFFFF5C5C)
           : (tr.state == 2
@@ -3351,10 +3368,12 @@ class WorldPainter extends CustomPainter {
           tr.pos.translate(tr.r * 0.4, tr.r * 0.4), mp);
       canvas.drawLine(tr.pos.translate(tr.r * 0.4, -tr.r * 0.4),
           tr.pos.translate(-tr.r * 0.4, tr.r * 0.4), mp);
+      });
     }
 
     // ballistas + their warning line
     for (final ba in ballistas) {
+      _projAt(canvas, ba.pos, 0, () {
       final dir = ba.vel.distance > 0
           ? ba.vel / ba.vel.distance
           : const Offset(1, 0);
@@ -3368,9 +3387,11 @@ class WorldPainter extends CustomPainter {
           Paint()
             ..color = const Color(0x33FF4D5E)
             ..strokeWidth = 2);
+      });
     }
 
     for (final d in doors) {
+      _projAt(canvas, d.pos, 0, () {
       final pulse = 0.5 + 0.5 * sin(time * 4 + d.pos.dx);
       canvas.drawCircle(d.pos, d.r + 12,
           Paint()..color = const Color(0xFFFFD45E).withValues(alpha: 0.2));
@@ -3393,9 +3414,33 @@ class WorldPainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       )..layout();
       tp.paint(canvas, d.pos - Offset(tp.width / 2, tp.height / 2));
+      // label so the player knows what each door grants on approach
+      final lp = TextPainter(
+        text: TextSpan(children: [
+          TextSpan(
+              text: '${d.def.title}\n',
+              style: const TextStyle(
+                  color: Color(0xFFFFD45E),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13,
+                  height: 1.3)),
+          TextSpan(
+              text: d.def.desc,
+              style: const TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 11)),
+        ]),
+        textAlign: TextAlign.center,
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 180);
+      lp.paint(canvas,
+          Offset(d.pos.dx - lp.width / 2, d.pos.dy + d.r * 1.2 + 6));
+      });
     }
 
     for (final b in bursts) {
+      _projAt(canvas, b.pos, 0, () {
       final double f = (b.t / 0.35).clamp(0.0, 1.0).toDouble();
       canvas.drawCircle(b.pos, b.maxR * f,
           Paint()..color = const Color(0xFFFF9A3C).withValues(alpha: (1 - f) * 0.22));
@@ -3406,17 +3451,24 @@ class WorldPainter extends CustomPainter {
             ..color = const Color(0xFFFFD45E).withValues(alpha: (1 - f) * 0.7)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 4);
+      });
     }
 
     for (final o in orbs) {
+      _projAt(canvas, o.pos, 0, () {
       final pul = 0.5 + 0.5 * sin(time * 6 + o.pos.dx);
       canvas.drawCircle(o.pos, 11,
           Paint()..color = const Color(0xFF8CFF98).withValues(alpha: 0.22));
       canvas.drawCircle(
           o.pos, 4 + pul * 1.6, Paint()..color = const Color(0xFFB6FFC0));
+      });
     }
 
-    for (final e in enemies) {
+    final sortedEnemies = [...enemies]
+      ..sort((a, b) =>
+          (a.pos.dx + a.pos.dy).compareTo(b.pos.dx + b.pos.dy));
+    for (final e in sortedEnemies) {
+      _projAt(canvas, e.pos, 0, () {
       final base = switch (e.kind) {
         1 => const Color(0xFFFF8A4C),
         2 => const Color(0xFF9B5CFF),
@@ -3521,9 +3573,11 @@ class WorldPainter extends CustomPainter {
             const Radius.circular(2)),
         Paint()..color = const Color(0xFF8CFF98),
       );
+      });
     }
 
     for (final b in bolts) {
+      _projAt(canvas, b.pos, 0, () {
       final col = b.crit
           ? const Color(0xFFFFE066)
           : (b.splash > 0 ? const Color(0xFFFF9A3C) : Colors.white);
@@ -3531,13 +3585,17 @@ class WorldPainter extends CustomPainter {
       canvas.drawCircle(
           b.pos, cr + 4, Paint()..color = col.withValues(alpha: 0.3));
       canvas.drawCircle(b.pos, cr, Paint()..color = col);
+      });
     }
     for (final e in ebolts) {
+      _projAt(canvas, e.pos, 0, () {
       canvas.drawCircle(e.pos, 9,
           Paint()..color = const Color(0xFFFF4D5E).withValues(alpha: 0.3));
       canvas.drawCircle(e.pos, 4.5, Paint()..color = const Color(0xFFFF6B79));
+      });
     }
 
+    _projAt(canvas, player.pos, 0, () {
     if (player.invuln > 0) {
       canvas.drawCircle(
           player.pos,
@@ -3560,7 +3618,9 @@ class WorldPainter extends CustomPainter {
       canvas.drawCircle(player.pos, player.radius + 6,
           Paint()..color = const Color(0x55FF5C6C));
     }
+    });
     for (final s in swings) {
+      _projAt(canvas, s.pos, 0, () {
       final k = (s.life / 0.18).clamp(0.0, 1.0).toDouble();
       final paint = Paint()
         ..color = Colors.white.withValues(alpha: 0.5 * k)
@@ -3574,19 +3634,26 @@ class WorldPainter extends CustomPainter {
         final rect = Rect.fromCircle(center: s.pos, radius: s.reach);
         canvas.drawArc(rect, s.ang - s.arc / 2, s.arc, false, paint);
       }
+      });
     }
     for (final g in ghosts) {
+      _projAt(canvas, g.pos, 0, () {
       final k = (g.life / 0.3).clamp(0.0, 1.0).toDouble();
       canvas.drawCircle(
           g.pos,
           player.radius,
           Paint()
             ..color = const Color(0xFF8CC8FF).withValues(alpha: 0.28 * k));
+      });
     }
-    _drawHero(canvas, player.pos, player.radius, player.def, player.buffStage,
-        t: time, moving: moving, look: facing);
+    _projAt(canvas, player.pos, 0, () {
+      _drawHero(canvas, player.pos, player.radius, player.def,
+          player.buffStage,
+          t: time, moving: moving, look: facing);
+    });
 
     for (final tx in texts) {
+      _projAt(canvas, tx.pos, 0, () {
       final a = tx.life.clamp(0.0, 1.0).toDouble();
       void dr(Color col, Offset at) {
         final tp = TextPainter(
@@ -3604,6 +3671,7 @@ class WorldPainter extends CustomPainter {
 
       dr(Colors.black, tx.pos.translate(1.4, 1.4));
       dr(tx.color, tx.pos);
+      });
     }
   }
 
