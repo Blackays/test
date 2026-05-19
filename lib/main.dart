@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -10,7 +11,38 @@ Future<void> main() async {
   await SystemChrome.setPreferredOrientations(
       [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await MetaStore.load();
+  await Sfx.init();
   runApp(const BuffBattleApp());
+}
+
+/// Tiny SFX layer: one pre-loaded AudioPlayer per sound, played by
+/// seek-to-zero + resume so we can spam shots/hits without churn.
+class Sfx {
+  static final Map<String, AudioPlayer> _p = {};
+  static const _names = ['hit', 'kill', 'dash', 'pickup', 'door'];
+
+  static Future<void> init() async {
+    for (final n in _names) {
+      try {
+        final ap = AudioPlayer()..setReleaseMode(ReleaseMode.stop);
+        await ap.setPlayerMode(PlayerMode.lowLatency);
+        await ap.setSource(AssetSource('sfx/$n.wav'));
+        _p[n] = ap;
+      } catch (_) {/* tests / unsupported platforms: stay silent */}
+    }
+  }
+
+  static void play(String name, {double vol = 0.6}) {
+    final ap = _p[name];
+    if (ap == null) return;
+    () async {
+      try {
+        await ap.setVolume(vol);
+        await ap.seek(Duration.zero);
+        await ap.resume();
+      } catch (_) {}
+    }();
+  }
 }
 
 class BuffBattleApp extends StatelessWidget {
@@ -1444,6 +1476,7 @@ class _GameScreenState extends State<GameScreen>
     _orbs.removeWhere((o) {
       if ((o.pos - _p.pos).distance < _p.radius + 9) {
         _gainXp(o.xp);
+        Sfx.play('pickup', vol: 0.5);
         return true;
       }
       return false;
@@ -1640,6 +1673,9 @@ class _GameScreenState extends State<GameScreen>
     _enemies.removeWhere((e) {
       if (e.hp <= 0) {
         if (e.kind == 3) _shake = max(_shake, 11.0);
+        _bursts.add(Burst(e.pos, e.kind == 3 ? 80 : 32));
+        Sfx.play('kill', vol: e.kind == 3 ? 0.85 : 0.55);
+        _shake = max(_shake, e.kind == 3 ? 11.0 : 2.0);
         _orbs.add(Orb(e.pos, e.xp));
         _p.obols += e.bounty;
         _p.mp = (_p.mp + 0.8).clamp(0, _p.maxMp).toDouble();
@@ -1679,6 +1715,9 @@ class _GameScreenState extends State<GameScreen>
   void _damageEnemy(Enemy e, double dmg, bool crit, [Offset? from]) {
     e.hp -= dmg;
     e.flash = 0.1;
+    _bursts.add(Burst(e.pos, crit ? 22 : 14));
+    Sfx.play('hit', vol: crit ? 0.7 : 0.45);
+    if (crit) _shake = max(_shake, 4.0);
     _texts.add(FloatText(
       e.pos.translate(0, -e.radius),
       crit ? '${dmg.toInt()}!' : '${dmg.toInt()}',
@@ -1809,6 +1848,8 @@ class _GameScreenState extends State<GameScreen>
     final unit = dir / n;
     _p.dashTimer = _p.dashCd;
     _p.invuln = max(_p.invuln, 0.32); // i-frames
+    Sfx.play('dash', vol: 0.55);
+    _shake = max(_shake, 3.0);
     const dist = 150.0;
     for (var i = 0; i < 6; i++) {
       _ghosts.add(Ghost(_p.pos));
@@ -2132,6 +2173,7 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _enterDoor(Door d) {
+    Sfx.play('door', vol: 0.6);
     if (d.def.kind == DoorKind.shop) {
       _shop = _rollShop();
       _doors.clear();
