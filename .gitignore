@@ -9,6 +9,7 @@ build/
 pubspec.lock
 
 # Generated platform folders (regenerate with `flutter create .`)
+.metadata
 /android/
 /ios/
 /linux/
