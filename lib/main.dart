@@ -416,11 +416,13 @@ class GameMap {
     final cols = ((sw * 2.4) / cell).round().clamp(18, 42).toInt();
     final rows = ((sh * 2.4) / cell).round().clamp(18, 64).toInt();
     final m = GameMap(cols, rows, cell);
-    final roomCount = 5 + rng.nextInt(3) + wave ~/ 5;
+    final roomCount = 6 + rng.nextInt(4) + wave ~/ 4;
     final centers = <Point<int>>[];
     for (var i = 0; i < roomCount; i++) {
-      final rw = 5 + rng.nextInt(6);
-      final rh = 5 + rng.nextInt(6);
+      // varied shapes: occasional big hall, occasional tight room
+      final big = rng.nextDouble() < 0.22;
+      final rw = (big ? 9 : 5) + rng.nextInt(big ? 7 : 6);
+      final rh = (big ? 9 : 5) + rng.nextInt(big ? 7 : 6);
       final rx = 2 + rng.nextInt(max(1, cols - rw - 4));
       final ry = 2 + rng.nextInt(max(1, rows - rh - 4));
       for (var c = rx; c < rx + rw; c++) {
@@ -432,9 +434,7 @@ class GameMap {
           rx.toDouble(), ry.toDouble(), rw.toDouble(), rh.toDouble()));
       centers.add(Point<int>(rx + rw ~/ 2, ry + rh ~/ 2));
     }
-    for (var i = 1; i < centers.length; i++) {
-      final a = centers[i - 1];
-      final b = centers[i];
+    void corridor(Point<int> a, Point<int> b) {
       for (var x = min(a.x, b.x); x <= max(a.x, b.x); x++) {
         m.set(x, a.y, 1);
         m.set(x, a.y + 1, 1);
@@ -444,6 +444,16 @@ class GameMap {
         m.set(b.x + 1, y, 1);
       }
     }
+
+    for (var i = 1; i < centers.length; i++) {
+      corridor(centers[i - 1], centers[i]);
+    }
+    // a few extra loops so the layout is less linear
+    final loops = 1 + rng.nextInt(3);
+    for (var i = 0; i < loops && centers.length > 2; i++) {
+      corridor(centers[rng.nextInt(centers.length)],
+          centers[rng.nextInt(centers.length)]);
+    }
     // interior obstacles: wall pillars + pools (keep room centers clear,
     // skip the start room so the player never spawns boxed in)
     for (var ri = 1; ri < m.rooms.length; ri++) {
@@ -452,9 +462,10 @@ class GameMap {
       final l = rr.left.toInt(), t = rr.top.toInt();
       final w = rr.width.toInt(), h = rr.height.toInt();
       final cc = l + w ~/ 2, cr = t + h ~/ 2;
-      if (rng.nextDouble() < 0.6) {
-        final pw = 2 + rng.nextInt(2);
-        final ph = 2 + rng.nextInt(2);
+      final poolBlobs = rng.nextDouble() < 0.85 ? (1 + rng.nextInt(2)) : 0;
+      for (var pb = 0; pb < poolBlobs; pb++) {
+        final pw = 2 + rng.nextInt(3);
+        final ph = 2 + rng.nextInt(3);
         final px = l + 1 + rng.nextInt(max(1, w - pw - 2));
         final py = t + 1 + rng.nextInt(max(1, h - ph - 2));
         for (var c = px; c < px + pw; c++) {
@@ -747,17 +758,23 @@ class _HeroCard extends StatelessWidget {
 /// ---------------------------------------------------------------------------
 /// Weapons
 /// ---------------------------------------------------------------------------
+enum WeaponKind { ranged, melee, thrust }
+
 class WeaponDef {
   const WeaponDef(this.name, this.desc,
-      {this.pellets = 1,
+      {this.kind = WeaponKind.ranged,
+      this.pellets = 1,
       this.spread = 0,
       this.dmgMul = 1,
       this.rofMul = 1,
       this.speedMul = 1,
       this.pierceAdd = 0,
-      this.splashAdd = 0});
+      this.splashAdd = 0,
+      this.reach = 78,
+      this.arc = 1.5});
   final String name;
   final String desc;
+  final WeaponKind kind;
   final int pellets;
   final double spread;
   final double dmgMul;
@@ -765,12 +782,42 @@ class WeaponDef {
   final double speedMul;
   final int pierceAdd;
   final double splashAdd;
+  final double reach; // melee/thrust range
+  final double arc; // melee swing angle (radians)
 }
 
 const WeaponDef kDefaultWeapon =
-    WeaponDef('SIDEARM', 'your trusty starter bonk');
+    WeaponDef('SIDEARM', 'trusty starter bonk');
 
 const List<WeaponDef> kWeapons = [
+  // melee / thrust
+  WeaponDef('STYGIUS SWORD', 'wide melee arc, strong',
+      kind: WeaponKind.melee,
+      dmgMul: 1.7,
+      rofMul: 0.52,
+      reach: 84,
+      arc: 1.7),
+  WeaponDef('VARATHA SPEAR', 'long narrow thrust',
+      kind: WeaponKind.thrust,
+      dmgMul: 1.9,
+      rofMul: 0.62,
+      reach: 138,
+      arc: 0.5),
+  WeaponDef('TWIN FANGS', 'fast short melee',
+      kind: WeaponKind.melee,
+      dmgMul: 0.8,
+      rofMul: 0.26,
+      reach: 56,
+      arc: 1.3),
+  WeaponDef('AEGIS BASH', 'short heavy melee',
+      kind: WeaponKind.melee,
+      dmgMul: 2.4,
+      rofMul: 0.8,
+      reach: 64,
+      arc: 2.4),
+  // ranged
+  WeaponDef('CORONACHT BOW', 'piercing power shots',
+      dmgMul: 1.7, rofMul: 1.05, speedMul: 1.6, pierceAdd: 2),
   WeaponDef('SMG', 'fast, weak, slight spray',
       pellets: 1, spread: 0.06, dmgMul: 0.62, rofMul: 0.45, speedMul: 1.1),
   WeaponDef('SHOTGUN', '6 pellets, close range',
@@ -779,8 +826,6 @@ const List<WeaponDef> kWeapons = [
       dmgMul: 3.4, rofMul: 2.0, speedMul: 1.9, pierceAdd: 4),
   WeaponDef('CANNON', 'explosive lobs',
       dmgMul: 2.2, rofMul: 1.7, speedMul: 0.8, splashAdd: 42),
-  WeaponDef('RIPPER', 'triple shred, pierces',
-      pellets: 3, spread: 0.22, dmgMul: 0.8, rofMul: 0.75, pierceAdd: 1),
   WeaponDef('MINIGUN', 'brrrt of tiny bonks',
       pellets: 1, spread: 0.10, dmgMul: 0.5, rofMul: 0.28, speedMul: 1.15),
 ];
@@ -924,6 +969,33 @@ class FloatText {
   double life = 0.8;
 }
 
+class Swing {
+  Swing(this.pos, this.ang, this.reach, this.arc, this.thrust);
+  Offset pos;
+  double ang;
+  double reach;
+  double arc;
+  bool thrust;
+  double life = 0.18;
+}
+
+class Trap {
+  Trap(this.pos);
+  final Offset pos;
+  double r = 30;
+  // 0 idle, 1 armed (counting down), 2 spent (cooldown)
+  int state = 0;
+  double timer = 0;
+}
+
+class Ballista {
+  Ballista(this.pos, this.vel, this.interval);
+  final Offset pos;
+  final Offset vel; // unit dir * speed
+  final double interval;
+  double timer = 0;
+}
+
 enum DoorKind { reward, boon, shop }
 
 class DoorDef {
@@ -977,6 +1049,9 @@ class _GameScreenState extends State<GameScreen>
   final List<Burst> _bursts = [];
   final List<FloatText> _texts = [];
   final List<Door> _doors = [];
+  final List<Swing> _swings = [];
+  final List<Trap> _traps = [];
+  final List<Ballista> _ballistas = [];
 
   Phase _phase = Phase.playing;
   int _wave = 1;
@@ -1022,7 +1097,7 @@ class _GameScreenState extends State<GameScreen>
 
   void _genRoom() {
     _map = GameMap.generate(_rng, _size.width, _size.height, _wave);
-    _p.pos = _map.roomCenter(0);
+    _p.pos = _map.roomCenter(0); // arrive at the entry gate
     _enemies.clear();
     _bolts.clear();
     _ebolts.clear();
@@ -1030,11 +1105,49 @@ class _GameScreenState extends State<GameScreen>
     _bursts.clear();
     _texts.clear();
     _doors.clear();
+    _swings.clear();
+    _traps.clear();
+    _ballistas.clear();
     _bossSpawned = false;
     _spawnTimer = 0.6;
-    _toSpawn = _bossWave
-        ? 7
-        : (6 + _wave * 2).clamp(6, 26).toInt();
+    _toSpawn = _bossWave ? 7 : (6 + _wave * 2).clamp(6, 26).toInt();
+
+    // traps: visible, sparse, away from the entry
+    final entry = _map.roomCenter(0);
+    final trapCount = _bossWave ? 0 : (2 + _rng.nextInt(3));
+    for (var i = 0; i < trapCount; i++) {
+      for (var tries = 0; tries < 30; tries++) {
+        final p = _map.randomFloor(_rng);
+        if ((p - entry).distance > 200) {
+          _traps.add(Trap(p));
+          break;
+        }
+      }
+    }
+    // ballistas: fire across rooms horizontally / vertically
+    final balCount = _bossWave ? 1 : (1 + _rng.nextInt(2)) + _floorIdx ~/ 2;
+    for (var i = 0; i < balCount; i++) {
+      final room = _map.rooms[1 + _rng.nextInt(max(1, _map.rooms.length - 1))];
+      final horiz = _rng.nextBool();
+      final cell = _map.cell;
+      if (horiz) {
+        final y = (room.top + room.height / 2) * cell;
+        final fromLeft = _rng.nextBool();
+        final x = fromLeft
+            ? (room.left + 0.3) * cell
+            : (room.left + room.width - 0.3) * cell;
+        _ballistas.add(Ballista(Offset(x, y),
+            Offset(fromLeft ? 300 : -300, 0), 2.4 + _rng.nextDouble()));
+      } else {
+        final x = (room.left + room.width / 2) * cell;
+        final fromTop = _rng.nextBool();
+        final y = fromTop
+            ? (room.top + 0.3) * cell
+            : (room.top + room.height - 0.3) * cell;
+        _ballistas.add(Ballista(Offset(x, y),
+            Offset(0, fromTop ? 300 : -300), 2.4 + _rng.nextDouble()));
+      }
+    }
   }
 
   void _initRun() {
@@ -1135,11 +1248,14 @@ class _GameScreenState extends State<GameScreen>
       _spawnTimer = (0.85 - _wave * 0.012).clamp(0.28, 0.85).toDouble();
     }
 
+    final atkRange = _p.weapon.kind == WeaponKind.ranged
+        ? _p.range
+        : _p.weapon.reach + 40;
     _p.fireTimer -= dt;
     if (_p.fireTimer <= 0) {
-      final t = _nearestEnemy(_p.range);
+      final t = _nearestEnemy(atkRange);
       if (t != null) {
-        _fireAt(t.pos - _p.pos);
+        _attack(t.pos - _p.pos);
         _p.fireTimer = _p.effFire * _p.weapon.rofMul;
         if (_p.volleys > 1) {
           _p.volleyLeft = _p.volleys - 1;
@@ -1150,10 +1266,57 @@ class _GameScreenState extends State<GameScreen>
     if (_p.volleyLeft > 0) {
       _p.volleyTimer -= dt;
       if (_p.volleyTimer <= 0) {
-        final t = _nearestEnemy(_p.range);
-        if (t != null) _fireAt(t.pos - _p.pos);
+        final t = _nearestEnemy(atkRange);
+        if (t != null) _attack(t.pos - _p.pos);
         _p.volleyLeft--;
         _p.volleyTimer = 0.10;
+      }
+    }
+
+    for (final s in _swings) {
+      s.life -= dt;
+    }
+    _swings.removeWhere((s) => s.life <= 0);
+
+    // ballistas fire periodically along their axis
+    for (final ba in _ballistas) {
+      ba.timer -= dt;
+      if (ba.timer <= 0) {
+        ba.timer = ba.interval;
+        _ebolts.add(EBolt(ba.pos, ba.vel, 1.5 * _floor.dmgMul));
+      }
+    }
+
+    // traps: step on -> arms -> detonates (AoE on enemies, spawns more,
+    // hurts you if you're still on it)
+    for (final tr in _traps) {
+      if (tr.state == 2) {
+        tr.timer -= dt;
+        if (tr.timer <= 0) tr.state = 0;
+        continue;
+      }
+      final on = (tr.pos - _p.pos).distance < tr.r;
+      if (tr.state == 0 && on) {
+        tr.state = 1;
+        tr.timer = 0.75;
+      } else if (tr.state == 1) {
+        tr.timer -= dt;
+        if (tr.timer <= 0) {
+          _bursts.add(Burst(tr.pos, tr.r + 18));
+          _shake = max(_shake, 7.0);
+          for (final e in _enemies) {
+            if ((e.pos - tr.pos).distance < tr.r + 18) {
+              _damageEnemy(e, 6.0 + _wave.toDouble(), true);
+            }
+          }
+          if ((tr.pos - _p.pos).distance < tr.r + 14) {
+            _hurtPlayer(3);
+          }
+          _toSpawn += 2; // the catch: triggering riles up more enemies
+          tr.state = 2;
+          tr.timer = 6;
+          if (_phase != Phase.playing) return;
+        }
       }
     }
 
@@ -1296,6 +1459,34 @@ class _GameScreenState extends State<GameScreen>
       }
     }
     return best;
+  }
+
+  void _attack(Offset aim) {
+    final w = _p.weapon;
+    if (w.kind == WeaponKind.ranged) {
+      _fireAt(aim);
+      return;
+    }
+    final ang = atan2(aim.dy, aim.dx);
+    final reach = w.reach;
+    final arc = w.arc;
+    _swings.add(Swing(_p.pos, ang, reach, arc, w.kind == WeaponKind.thrust));
+    for (final e in _enemies) {
+      final v = e.pos - _p.pos;
+      final d = v.distance;
+      if (d > reach + e.radius || d < 0.01) continue;
+      var da = (atan2(v.dy, v.dx) - ang) % (2 * pi);
+      if (da > pi) da -= 2 * pi;
+      if (da < -pi) da += 2 * pi;
+      if (da.abs() <= arc / 2) {
+        final crit = _rng.nextDouble() < _p.critChance + 0.05;
+        _damageEnemy(e, _p.damage * w.dmgMul * (crit ? 2 : 1), crit);
+        if (_p.dot > 0) {
+          e.dotDps = _p.dot;
+          e.dotTimer = 2.0;
+        }
+      }
+    }
   }
 
   void _fireAt(Offset aim) {
@@ -1563,14 +1754,17 @@ class _GameScreenState extends State<GameScreen>
             (_) {}),
       ));
     } else {
-      final picks = _rollDoorDefs();
-      _doors.add(Door(_map.roomCenter(rc - 1), picks[0]));
-      _doors.add(Door(_map.roomCenter(rc - 2), picks[1]));
+      final maxGates = (rc - 1).clamp(2, 4).toInt();
+      final n = (2 + _rng.nextInt(3)).clamp(2, maxGates).toInt();
+      final picks = _rollDoorDefs(n);
+      for (var i = 0; i < n; i++) {
+        _doors.add(Door(_map.roomCenter(rc - 1 - i), picks[i]));
+      }
     }
     _phase = Phase.roomCleared;
   }
 
-  List<DoorDef> _rollDoorDefs() {
+  List<DoorDef> _rollDoorDefs([int n = 2]) {
     final fi = _floorIdx;
     final gun = kWeapons[_rng.nextInt(kWeapons.length)];
     final pool = <DoorDef>[
@@ -1588,7 +1782,7 @@ class _GameScreenState extends State<GameScreen>
       DoorDef('👁', 'WATCHTOWER', '+0.2 view', DoorKind.reward,
           (p) => p.vision = (p.vision + 0.2).clamp(1.0, 2.6).toDouble()),
     ]..shuffle(_rng);
-    return pool.take(2).toList();
+    return pool.take(n.clamp(2, pool.length).toInt()).toList();
   }
 
   void _enterDoor(Door d) {
@@ -1744,6 +1938,9 @@ class _GameScreenState extends State<GameScreen>
                       bursts: _bursts,
                       texts: _texts,
                       doors: _doors,
+                      swings: _swings,
+                      traps: _traps,
+                      ballistas: _ballistas,
                       map: _ready ? _map : null,
                       floor: _floor,
                       time: _elapsed,
@@ -2542,6 +2739,9 @@ class WorldPainter extends CustomPainter {
     required this.bursts,
     required this.texts,
     required this.doors,
+    required this.swings,
+    required this.traps,
+    required this.ballistas,
     required this.map,
     required this.floor,
     required this.time,
@@ -2563,6 +2763,9 @@ class WorldPainter extends CustomPainter {
   final List<Burst> bursts;
   final List<FloatText> texts;
   final List<Door> doors;
+  final List<Swing> swings;
+  final List<Trap> traps;
+  final List<Ballista> ballistas;
   final GameMap? map;
   final FloorDef floor;
   final double time;
@@ -2712,6 +2915,51 @@ class WorldPainter extends CustomPainter {
   }
 
   void _paintWorld(Canvas canvas) {
+    // traps
+    for (final tr in traps) {
+      final col = tr.state == 1
+          ? const Color(0xFFFF5C5C)
+          : (tr.state == 2
+              ? const Color(0x55FFFFFF)
+              : const Color(0xFFFFB347));
+      final pulse =
+          tr.state == 1 ? 0.5 + 0.5 * sin(time * 24) : 0.4;
+      canvas.drawCircle(tr.pos, tr.r,
+          Paint()..color = col.withValues(alpha: 0.18 + 0.2 * pulse));
+      canvas.drawCircle(
+          tr.pos,
+          tr.r,
+          Paint()
+            ..color = col
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2);
+      // X mark
+      final mp = Paint()
+        ..color = col
+        ..strokeWidth = 3;
+      canvas.drawLine(tr.pos.translate(-tr.r * 0.4, -tr.r * 0.4),
+          tr.pos.translate(tr.r * 0.4, tr.r * 0.4), mp);
+      canvas.drawLine(tr.pos.translate(tr.r * 0.4, -tr.r * 0.4),
+          tr.pos.translate(-tr.r * 0.4, tr.r * 0.4), mp);
+    }
+
+    // ballistas + their warning line
+    for (final ba in ballistas) {
+      final dir = ba.vel.distance > 0
+          ? ba.vel / ba.vel.distance
+          : const Offset(1, 0);
+      canvas.drawRect(
+          Rect.fromCenter(center: ba.pos, width: 22, height: 22),
+          Paint()..color = _shd(floor.prop, 0.1));
+      canvas.drawCircle(ba.pos, 7, Paint()..color = const Color(0xFFBB4444));
+      canvas.drawLine(
+          ba.pos,
+          ba.pos + dir * 1400,
+          Paint()
+            ..color = const Color(0x33FF4D5E)
+            ..strokeWidth = 2);
+    }
+
     for (final d in doors) {
       final pulse = 0.5 + 0.5 * sin(time * 4 + d.pos.dx);
       canvas.drawCircle(d.pos, d.r + 12,
@@ -2891,6 +3139,21 @@ class WorldPainter extends CustomPainter {
     if (player.hurtFlash > 0) {
       canvas.drawCircle(player.pos, player.radius + 6,
           Paint()..color = const Color(0x55FF5C6C));
+    }
+    for (final s in swings) {
+      final k = (s.life / 0.18).clamp(0.0, 1.0).toDouble();
+      final paint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.5 * k)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 6;
+      if (s.thrust) {
+        final tip = s.pos +
+            Offset(cos(s.ang), sin(s.ang)) * s.reach * (1.0 - k * 0.3);
+        canvas.drawLine(s.pos, tip, paint..strokeWidth = 10);
+      } else {
+        final rect = Rect.fromCircle(center: s.pos, radius: s.reach);
+        canvas.drawArc(rect, s.ang - s.arc / 2, s.arc, false, paint);
+      }
     }
     _drawHero(canvas, player.pos, player.radius, player.def, player.buffStage,
         t: time, moving: moving, look: facing);
