@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -1880,6 +1881,7 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _genRoom() {
+    WorldPainter.resetCaches(); // drop stale floor/wall caches from previous map
     _map = GameMap.generate(_rng, _size.width, _size.height, _wave);
     final entryPos = _edgeSpawn(_entrySide);
     _p.pos = entryPos;
@@ -2048,11 +2050,14 @@ class _GameScreenState extends State<GameScreen>
       b.t += dt;
     }
     _bursts.removeWhere((b) => b.t > 0.35);
+    // Cap visible bursts/texts so dense fights don't pile up draw calls.
+    if (_bursts.length > 32) _bursts.removeRange(0, _bursts.length - 32);
     for (final t in _texts) {
       t.pos = t.pos.translate(0, -34 * dt);
       t.life -= dt;
     }
     _texts.removeWhere((t) => t.life <= 0);
+    if (_texts.length > 24) _texts.removeRange(0, _texts.length - 24);
 
     // orbs always collectible (including while roaming a cleared room)
     for (final o in _orbs) {
@@ -3356,7 +3361,10 @@ class _GameScreenState extends State<GameScreen>
               fit: StackFit.expand,
               children: [
                 Positioned.fill(
-                  child: CustomPaint(
+                  child: RepaintBoundary(
+                      child: CustomPaint(
+                    isComplex: true,
+                    willChange: true,
                     painter: WorldPainter(
                       player: _p,
                       enemies: _enemies,
@@ -3383,7 +3391,7 @@ class _GameScreenState extends State<GameScreen>
                       stickKnob: _stickKnob,
                       ready: _ready,
                     ),
-                  ),
+                  )),
                 ),
                 if (_ready) _hud(),
                 if (_ready && _combo > 1) _comboBadge(),
@@ -4583,10 +4591,50 @@ class WorldPainter extends CustomPainter {
       ..close();
   }
 
+  // Cached static layer per GameMap. We rebuild the void + floor + pool-base
+  // tiles into a Picture exactly once per generated map and stamp it each
+  // frame; only the pool shimmer needs per-frame work.
+  static final Map<int, ui.Picture> _mapBgCache = {};
+  static final Map<int, List<int>> _poolTiles = {};
+
+  // Called by the game when a fresh GameMap is generated so the per-map
+  // static caches don't leak memory across rooms.
+  static void resetCaches() {
+    for (final p in _mapBgCache.values) {
+      p.dispose();
+    }
+    _mapBgCache.clear();
+    _poolTiles.clear();
+    _wallEntries.clear();
+  }
+
   void _paintMap(Canvas canvas, GameMap m) {
+    final id = identityHashCode(m);
+    final pic = _mapBgCache.putIfAbsent(id, () => _buildStaticMapPicture(m));
+    canvas.drawPicture(pic);
+
+    // Pools animate (shimmer), so they get a small per-frame pass — but only
+    // over the precomputed pool-tile list rather than scanning all cells.
+    final pools = _poolTiles[id];
+    if (pools == null || pools.isEmpty) return;
+    final cell = m.cell;
+    final cols = m.cols;
+    final shimmer = Paint();
+    for (final idx in pools) {
+      final c = idx % cols, r = idx ~/ cols;
+      final sh = 0.5 + 0.5 * sin(time * 2 + c * 0.7 + r * 0.5);
+      shimmer.color =
+          _lit(floor.pool, 0.22 * sh).withValues(alpha: 0.5);
+      canvas.drawPath(_tilePath(cell, c, r), shimmer);
+    }
+  }
+
+  ui.Picture _buildStaticMapPicture(GameMap m) {
     final cell = m.cell;
     final w = m.worldW, h = m.worldH;
-    // void backdrop = the projected map diamond
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
     final back = Path()
       ..addPolygon([
         isoProject(const Offset(0, 0)),
@@ -4601,8 +4649,13 @@ class WorldPainter extends CustomPainter {
       ..color = floor.grid.withValues(alpha: 0.5)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
+    final poolFill = Paint()..color = floor.pool;
+    final poolEdge = Paint()
+      ..color = _shd(floor.pool, 0.35)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
 
-    // ground pass: floor + pools (coplanar, any order)
+    final pools = <int>[];
     for (var r = 0; r < m.rows; r++) {
       for (var c = 0; c < m.cols; c++) {
         final t = m.tt(c, r);
@@ -4611,23 +4664,51 @@ class WorldPainter extends CustomPainter {
           canvas.drawPath(pth, floorPaint);
           canvas.drawPath(pth, edge);
         } else if (t == 2) {
-          final sh = 0.5 + 0.5 * sin(time * 2 + c * 0.7 + r * 0.5);
           final pth = _tilePath(cell, c, r);
-          canvas.drawPath(pth, Paint()..color = floor.pool);
-          canvas.drawPath(
-              pth,
-              Paint()
-                ..color = _lit(floor.pool, 0.22 * sh).withValues(alpha: 0.5));
-          canvas.drawPath(
-              pth,
-              Paint()
-                ..color = _shd(floor.pool, 0.35)
-                ..style = PaintingStyle.stroke
-                ..strokeWidth = 1.5);
+          canvas.drawPath(pth, poolFill);
+          canvas.drawPath(pth, poolEdge);
+          pools.add(r * m.cols + c);
         }
       }
     }
 
+    _poolTiles[identityHashCode(m)] = pools;
+    return recorder.endRecording();
+  }
+
+  // Visible-wall cells precomputed once per map so the per-frame draw skips
+  // the 2700-cell scan and only walks the small set of cells that matter.
+  // Each entry packs (c, r, hsh, isWall) into a flat int list: 4 ints per cell.
+  static final Map<int, List<int>> _wallEntries = {};
+
+  List<int> _wallEntriesFor(GameMap m) {
+    final id = identityHashCode(m);
+    final cached = _wallEntries[id];
+    if (cached != null) return cached;
+    final out = <int>[];
+    for (var r = 0; r < m.rows; r++) {
+      for (var c = 0; c < m.cols; c++) {
+        if (m.tt(c, r) != 0) continue;
+        final play = m.tt(c - 1, r) > 0 ||
+            m.tt(c + 1, r) > 0 ||
+            m.tt(c, r - 1) > 0 ||
+            m.tt(c, r + 1) > 0;
+        final hsh = (c * 73 + r * 131) % 100;
+        if (play) {
+          out.add(c);
+          out.add(r);
+          out.add(hsh);
+          out.add(1);
+        } else if (hsh < 8) {
+          out.add(c);
+          out.add(r);
+          out.add(hsh);
+          out.add(0);
+        }
+      }
+    }
+    _wallEntries[id] = out;
+    return out;
   }
 
   // Walls are tall, so they participate in the depth-sorted pass with
@@ -4648,53 +4729,50 @@ class WorldPainter extends CustomPainter {
       return Offset(s.dx, s.dy - lift);
     }
 
-    for (var r = 0; r < m.rows; r++) {
-      for (var c = 0; c < m.cols; c++) {
-        if (m.tt(c, r) != 0) continue;
-        final play = m.tt(c - 1, r) > 0 ||
-            m.tt(c + 1, r) > 0 ||
-            m.tt(c, r - 1) > 0 ||
-            m.tt(c, r + 1) > 0;
-        final hsh = (c * 73 + r * 131) % 100;
-        final depth = c + r + 0.5;
-        if (play) {
-          add(depth, () {
-            final x0 = c * cell, y0 = r * cell, x1 = x0 + cell, y1 = y0 + cell;
-            canvas.drawPath(
-                Path()
-                  ..moveTo(pj(x1, y0, 0).dx, pj(x1, y0, 0).dy)
-                  ..lineTo(pj(x1, y1, 0).dx, pj(x1, y1, 0).dy)
-                  ..lineTo(pj(x1, y1, kWallH).dx, pj(x1, y1, kWallH).dy)
-                  ..lineTo(pj(x1, y0, kWallH).dx, pj(x1, y0, kWallH).dy)
-                  ..close(),
-                sideR);
-            canvas.drawPath(
-                Path()
-                  ..moveTo(pj(x0, y1, 0).dx, pj(x0, y1, 0).dy)
-                  ..lineTo(pj(x1, y1, 0).dx, pj(x1, y1, 0).dy)
-                  ..lineTo(pj(x1, y1, kWallH).dx, pj(x1, y1, kWallH).dy)
-                  ..lineTo(pj(x0, y1, kWallH).dx, pj(x0, y1, kWallH).dy)
-                  ..close(),
-                sideF);
-            final top = _tilePath(cell, c, r, kWallH);
-            canvas.drawPath(top, topP);
-            canvas.drawPath(top, topEdge);
-            if (hsh < 40) {
-              _projAt(canvas, Offset((c + 0.5) * cell, (r + 0.4) * cell),
-                  kWallH,
-                  () => _drawProp(canvas,
-                      Offset((c + 0.5) * cell, (r + 0.4) * cell),
-                      cell, hsh % 5, floor));
-            }
-          });
-        } else if (hsh < 8) {
-          add(depth, () {
-            _projAt(canvas, Offset((c + 0.5) * cell, (r + 0.5) * cell), 0,
+    final entries = _wallEntriesFor(m);
+    for (var i = 0; i < entries.length; i += 4) {
+      final c = entries[i];
+      final r = entries[i + 1];
+      final hsh = entries[i + 2];
+      final isWall = entries[i + 3] == 1;
+      final depth = c + r + 0.5;
+      if (isWall) {
+        add(depth, () {
+          final x0 = c * cell, y0 = r * cell, x1 = x0 + cell, y1 = y0 + cell;
+          canvas.drawPath(
+              Path()
+                ..moveTo(pj(x1, y0, 0).dx, pj(x1, y0, 0).dy)
+                ..lineTo(pj(x1, y1, 0).dx, pj(x1, y1, 0).dy)
+                ..lineTo(pj(x1, y1, kWallH).dx, pj(x1, y1, kWallH).dy)
+                ..lineTo(pj(x1, y0, kWallH).dx, pj(x1, y0, kWallH).dy)
+                ..close(),
+              sideR);
+          canvas.drawPath(
+              Path()
+                ..moveTo(pj(x0, y1, 0).dx, pj(x0, y1, 0).dy)
+                ..lineTo(pj(x1, y1, 0).dx, pj(x1, y1, 0).dy)
+                ..lineTo(pj(x1, y1, kWallH).dx, pj(x1, y1, kWallH).dy)
+                ..lineTo(pj(x0, y1, kWallH).dx, pj(x0, y1, kWallH).dy)
+                ..close(),
+              sideF);
+          final top = _tilePath(cell, c, r, kWallH);
+          canvas.drawPath(top, topP);
+          canvas.drawPath(top, topEdge);
+          if (hsh < 40) {
+            _projAt(canvas, Offset((c + 0.5) * cell, (r + 0.4) * cell),
+                kWallH,
                 () => _drawProp(canvas,
-                    Offset((c + 0.5) * cell, (r + 0.5) * cell),
+                    Offset((c + 0.5) * cell, (r + 0.4) * cell),
                     cell, hsh % 5, floor));
-          });
-        }
+          }
+        });
+      } else {
+        add(depth, () {
+          _projAt(canvas, Offset((c + 0.5) * cell, (r + 0.5) * cell), 0,
+              () => _drawProp(canvas,
+                  Offset((c + 0.5) * cell, (r + 0.5) * cell),
+                  cell, hsh % 5, floor));
+        });
       }
     }
   }
