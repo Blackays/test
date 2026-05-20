@@ -1878,10 +1878,11 @@ class Burst {
 }
 
 class FloatText {
-  FloatText(this.pos, this.text, this.color);
+  FloatText(this.pos, this.text, this.color, {this.size = 14});
   Offset pos;
   String text;
   Color color;
+  double size;
   double life = 0.8;
 }
 
@@ -2116,6 +2117,14 @@ class _GameScreenState extends State<GameScreen>
   int _combo = 0;
   double _comboT = 0;
   RoomKind _roomKind = RoomKind.normal;
+  // Microsecond hit-stop: when > 0, the simulation freezes for that many
+  // seconds so a crit or boss hit lands with weight. Rendering continues.
+  double _freezeT = 0;
+  String? _bossIntro;
+  double _bossIntroT = 0;
+  // Whichever enemy the auto-aim is locked onto this frame — drawn with a
+  // subtle ring so the player can read where their next shot is going.
+  Enemy? _aimAt;
   // Hades-style room flow. Player spawns at one of the two LOWER corners
   // (2 = lower-left, 3 = lower-right) and the exit portals appear at the
   // diagonally opposite UPPER corner (0 = upper-left, 1 = upper-right).
@@ -2285,6 +2294,13 @@ class _GameScreenState extends State<GameScreen>
     if (_shake > 0) {
       _shake -= dt * 26;
       if (_shake < 0) _shake = 0;
+    }
+    if (_bossIntroT > 0) _bossIntroT -= dt;
+    // Hit-stop: drain the freeze timer with real time, but pass dt=0 to
+    // the simulation while it's active. Rendering keeps animating.
+    if (_freezeT > 0) {
+      _freezeT -= dt;
+      dt = 0;
     }
     if (_phase == Phase.playing || _phase == Phase.roomCleared) _update(dt);
     setState(() {});
@@ -2502,9 +2518,12 @@ class _GameScreenState extends State<GameScreen>
     final atkRange = _p.weapon.kind == WeaponKind.ranged
         ? _p.range
         : _p.weapon.reach + 40;
+    // Update the aim-target highlight every tick — used by the painter to
+    // draw a yellow ring on whoever the auto-aim is currently shooting at.
+    _aimAt = _nearestEnemy(atkRange);
     _p.fireTimer -= dt;
     if (_p.fireTimer <= 0) {
-      final t = _nearestEnemy(atkRange);
+      final t = _aimAt;
       if (t != null) {
         _attack(t.pos - _p.pos);
         _p.fireTimer = _p.effFire * _p.weapon.rofMul * _comboFireMul;
@@ -2859,8 +2878,13 @@ class _GameScreenState extends State<GameScreen>
     _texts.add(FloatText(
       e.pos.translate(0, -e.radius),
       crit ? '${dmg.toInt()}!' : '${dmg.toInt()}',
-      crit ? const Color(0xFFFFE066) : Colors.white,
+      crit ? const Color(0xFFFF9A3C) : Colors.white,
+      size: crit ? 22 : 14,
     ));
+    // Tiny hit-stop on crits + boss damage so impactful hits register.
+    if (crit || e.kind == 3) {
+      _freezeT = max(_freezeT, e.kind == 3 ? 0.07 : 0.05);
+    }
     if (from != null && _p.knockback > 0) {
       final v = e.pos - from;
       final n = v.distance;
@@ -3123,6 +3147,11 @@ class _GameScreenState extends State<GameScreen>
         bounty: 25,
         xp: _xpFor(3),
       ));
+      // Drop a boss-intro banner so the wave reads as an event.
+      _bossIntro = kBossNames[_floorIdx.clamp(0, kBossNames.length - 1)];
+      _bossIntroT = 2.4;
+      _shake = max(_shake, 6.0);
+      Sfx.play('kill', vol: 0.85, pitch: 0.7);
       return;
     }
 
@@ -3757,12 +3786,15 @@ class _GameScreenState extends State<GameScreen>
                       stickOrigin: _stickOrigin,
                       stickKnob: _stickKnob,
                       ready: _ready,
+                      aimAt: _aimAt,
                     ),
                   )),
                 ),
                 if (_ready) _hud(),
                 if (_ready && _combo > 1) _comboBadge(),
                 if (_ready) _bossBar(),
+                if (_ready && _bossIntroT > 0 && _bossIntro != null)
+                  _bossIntroOverlay(),
                 if (_ready && _phase == Phase.playing) _abilityButton(),
                 if (_ready && play) _dashButton(),
                 if (_ready && play) _pauseButton(),
@@ -3919,6 +3951,45 @@ class _GameScreenState extends State<GameScreen>
         ),
       ],
     ));
+  }
+
+  // Slides in for ~2.4s when a boss spawns, fading the last second.
+  Widget _bossIntroOverlay() {
+    final t = _bossIntroT;
+    final entry = (2.4 - t).clamp(0.0, 0.4) / 0.4; // ease-in over first 0.4s
+    final fade = t < 0.8 ? (t / 0.8).clamp(0.0, 1.0) : 1.0;
+    final yOffset = (1 - entry) * -40.0;
+    return Positioned(
+      top: 110,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        ignoring: true,
+        child: Transform.translate(
+          offset: Offset(0, yOffset),
+          child: Opacity(
+            opacity: fade,
+            child: Column(children: [
+              const Text('— BOSS —',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: Color(0xFFFF3B5C),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
+                      letterSpacing: 6)),
+              const SizedBox(height: 4),
+              Text(_bossIntro!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Color(0xFFFFD45E),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 22,
+                      letterSpacing: 1)),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _bossBar() {
@@ -4815,6 +4886,7 @@ class WorldPainter extends CustomPainter {
     required this.stickOrigin,
     required this.stickKnob,
     required this.ready,
+    this.aimAt,
   });
 
   final Player player;
@@ -4841,6 +4913,7 @@ class WorldPainter extends CustomPainter {
   final Offset stickOrigin;
   final Offset stickKnob;
   final bool ready;
+  final Enemy? aimAt;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -4871,6 +4944,10 @@ class WorldPainter extends CustomPainter {
     for (final item in queue) {
       item.$2();
     }
+    // Aim indicator: a soft pulsing ring around whichever enemy the
+    // auto-aim is currently locked onto. Drawn above entities so it
+    // reads even against busy backgrounds.
+    _paintAim(canvas);
     // Small fast projectiles are drawn flat on top of the depth-sorted
     // pass instead of going through it — saves a closure + tuple per bolt
     // per frame, which adds up fast during volley-heavy combat.
@@ -4946,6 +5023,33 @@ class WorldPainter extends CustomPainter {
     _mapBgCache.clear();
     _poolTiles.clear();
     _wallEntries.clear();
+  }
+
+  // Pulsing reticle around the locked-on enemy so the player can see where
+  // their auto-aim is pointing without disrupting the combat flow.
+  void _paintAim(Canvas canvas) {
+    final a = aimAt;
+    if (a == null) return;
+    _projAt(canvas, a.pos, 0, () {
+      final pulse = 0.5 + 0.5 * sin(time * 12);
+      final r = a.radius + 8 + pulse * 3;
+      canvas.drawCircle(
+          a.pos,
+          r,
+          Paint()
+            ..color = const Color(0xFFFFD45E)
+                .withValues(alpha: 0.25 + 0.25 * pulse)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2);
+      // Two short brackets at the top/bottom of the ring for a "targeted" look.
+      final tick = Paint()
+        ..color = const Color(0xFFFFD45E).withValues(alpha: 0.7)
+        ..strokeWidth = 2;
+      canvas.drawLine(a.pos.translate(-r, -r - 2),
+          a.pos.translate(-r + 6, -r - 2), tick);
+      canvas.drawLine(a.pos.translate(r - 6, -r - 2),
+          a.pos.translate(r, -r - 2), tick);
+    });
   }
 
   // Cheap projectile pass: draws every bolt + enemy bolt directly with two
@@ -5537,7 +5641,7 @@ class WorldPainter extends CustomPainter {
             text: tx.text,
             style: TextStyle(
                 color: col.withValues(alpha: a),
-                fontSize: 14,
+                fontSize: tx.size,
                 fontWeight: FontWeight.w900,
                 fontFamily: 'RobotoMono',
                 fontFamilyFallback: const ['NotoEmoji']),
