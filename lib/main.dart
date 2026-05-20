@@ -15,6 +15,7 @@ Future<void> main() async {
       [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await MetaStore.load();
   await GameStats.load();
+  await Settings.load();
   await Sfx.init();
   runApp(const BuffBattleApp());
 }
@@ -39,9 +40,11 @@ class Sfx {
   static void play(String name, {double vol = 0.6}) {
     final ap = _p[name];
     if (ap == null) return;
+    final v = (vol * Settings.sfxVol).clamp(0.0, 1.0).toDouble();
+    if (v <= 0.0) return;
     () async {
       try {
-        await ap.setVolume(vol);
+        await ap.setVolume(v);
         await ap.seek(Duration.zero);
         await ap.resume();
       } catch (_) {}
@@ -184,6 +187,13 @@ final List<Keepsake> kKeepsakes = [
   Keepsake('PIERCED HEART', '+8% crit chance',
       (p) => p.critChance += 0.08),
   Keepsake('LAMBENT PLUME', '+22 move speed', (p) => p.speed += 22),
+  Keepsake('FROST WARD', "you can't be chilled", (p) {
+    p.frostImmune = true;
+    p.maxHp += 2;
+    p.hp += 2;
+  }),
+  Keepsake('FERAL FANG', '+10% lifesteal',
+      (p) => p.lifesteal = (p.lifesteal + 0.1)),
 ];
 
 class Loadout {
@@ -669,6 +679,16 @@ class _TitleScreenState extends State<TitleScreen> {
                 if (mounted) setState(() {});
               },
             ),
+            const SizedBox(height: 12),
+            _BigButton(
+              label: '⚙ SETTINGS',
+              color: const Color(0xFF8CC8FF),
+              onTap: () async {
+                await Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const SettingsScreen()));
+                if (mounted) setState(() {});
+              },
+            ),
             const SizedBox(height: 18),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -827,6 +847,77 @@ class _HomeScreenState extends State<HomeScreen> {
 /// ---------------------------------------------------------------------------
 /// Character select
 /// ---------------------------------------------------------------------------
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  @override
+  void dispose() {
+    Settings.save();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('SETTINGS')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Text('SFX volume  ${(Settings.sfxVol * 100).round()}%',
+              style: const TextStyle(
+                  color: Color(0xFFFFD45E),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 14)),
+          Slider(
+            min: 0,
+            max: 1,
+            value: Settings.sfxVol,
+            onChanged: (v) => setState(() => Settings.sfxVol = v),
+            onChangeEnd: (_) => Sfx.play('pickup', vol: 0.6),
+          ),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            title: const Text('Screen shake',
+                style: TextStyle(color: Colors.white)),
+            subtitle: const Text(
+                'camera kick on hits, dashes, and explosions',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
+            value: Settings.shake,
+            onChanged: (v) => setState(() => Settings.shake = v),
+            activeThumbColor: const Color(0xFFFFD45E),
+          ),
+          SwitchListTile(
+            title: const Text('Vibration (mobile)',
+                style: TextStyle(color: Colors.white)),
+            subtitle: const Text(
+                'haptic pulses on dash, hits, and damage',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
+            value: Settings.haptics,
+            onChanged: (v) => setState(() => Settings.haptics = v),
+            activeThumbColor: const Color(0xFFFFD45E),
+          ),
+          const SizedBox(height: 14),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                Settings.tutorialDone = false;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('tutorial will show again next run')));
+            },
+            child: const Text('Reset tutorial',
+                style: TextStyle(color: Color(0xFF8CC8FF))),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class CharacterSelectScreen extends StatelessWidget {
   const CharacterSelectScreen({super.key});
 
@@ -1066,6 +1157,14 @@ const List<WeaponDef> kWeapons = [
       dmgMul: 2.2, rofMul: 1.7, speedMul: 0.8, splashAdd: 42),
   WeaponDef('MINIGUN', 'brrrt of tiny bonks',
       pellets: 1, spread: 0.10, dmgMul: 0.5, rofMul: 0.28, speedMul: 1.15),
+  WeaponDef('REVOLVER', 'slow but heavy hitters',
+      pellets: 1, spread: 0.02, dmgMul: 2.6, rofMul: 1.55, speedMul: 1.45),
+  WeaponDef('AUTO BOW', 'rapid piercing shots',
+      pellets: 1, spread: 0.04, dmgMul: 0.95, rofMul: 0.36, speedMul: 1.35,
+      pierceAdd: 1),
+  WeaponDef('GRENADE LAUNCHER', 'big splash, slow lob',
+      pellets: 1, spread: 0.03, dmgMul: 1.6, rofMul: 1.4, speedMul: 0.65,
+      splashAdd: 60),
 ];
 
 /// ---------------------------------------------------------------------------
@@ -1127,6 +1226,8 @@ class Player {
   double fireTimer = 0;
   double regen = 0;
   double hurtFlash = 0;
+  double frostT = 0; // movement-slow timer applied by FROST enemies
+  bool frostImmune = false;
   double abilityTimer = 0;
   double invuln = 0;
   double frenzy = 0;
@@ -1271,6 +1372,35 @@ class Door {
   double r = 30;
 }
 
+/// Per-device toggles (volume, screen shake, haptics, tutorial flag),
+/// persisted via SharedPreferences. Safe defaults if loading fails.
+class Settings {
+  static double sfxVol = 0.7;
+  static bool shake = true;
+  static bool haptics = true;
+  static bool tutorialDone = false;
+
+  static Future<void> load() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      sfxVol = (p.getDouble('bb_sfxVol') ?? 0.7).clamp(0.0, 1.0);
+      shake = p.getBool('bb_shake') ?? true;
+      haptics = p.getBool('bb_haptics') ?? true;
+      tutorialDone = p.getBool('bb_tut') ?? false;
+    } catch (_) {}
+  }
+
+  static Future<void> save() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setDouble('bb_sfxVol', sfxVol);
+      await p.setBool('bb_shake', shake);
+      await p.setBool('bb_haptics', haptics);
+      await p.setBool('bb_tut', tutorialDone);
+    } catch (_) {}
+  }
+}
+
 class GameStats {
   static int bestWave = 0;
   static int bestFloor = 0;
@@ -1342,6 +1472,7 @@ class _GameScreenState extends State<GameScreen>
   Size _size = Size.zero;
   late GameMap _map;
   bool _ready = false;
+  bool _showTutorial = false;
 
   late Player _p;
   final List<Enemy> _enemies = [];
@@ -1498,6 +1629,7 @@ class _GameScreenState extends State<GameScreen>
     _genRoom();
     _phase = Phase.playing;
     _ready = true;
+    _showTutorial = !Settings.tutorialDone;
   }
 
   void _onTick(Duration elapsed) {
@@ -1533,10 +1665,14 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _update(double dt) {
+    if (_showTutorial) return; // freeze gameplay until the player dismisses
     if (_moveDir != Offset.zero) {
-      _p.pos = _slide(_p.pos, _moveDir * _p.speed * dt, _p.radius * 0.7);
+      final spdMul = _p.frostT > 0 ? 0.55 : 1.0;
+      _p.pos =
+          _slide(_p.pos, _moveDir * _p.speed * spdMul * dt, _p.radius * 0.7);
       _facing = _moveDir;
     }
+    if (_p.frostT > 0) _p.frostT -= dt;
     if (_p.hurtFlash > 0) _p.hurtFlash -= dt;
     if (_p.invuln > 0) _p.invuln -= dt;
     if (_p.frenzy > 0) _p.frenzy -= dt;
@@ -1731,7 +1867,23 @@ class _GameScreenState extends State<GameScreen>
           _texts.add(FloatText(e.pos.translate(0, -e.radius),
               '${_p.thorns.toInt()}', const Color(0xFFFFB347)));
         }
-        _hurtPlayer(e.damage);
+        if (e.kind == 8) {
+          // KAMIKAZE: bursts on contact, hits hard, dies.
+          _bursts.add(Burst(e.pos, 96));
+          _shake = max(_shake, 7.0);
+          Sfx.play('kill', vol: 0.75);
+          _hurtPlayer(e.damage * 1.6);
+          e.hp = 0;
+        } else {
+          if (e.kind == 6 && !_p.frostImmune) {
+            _p.frostT = 1.5; // FROST chills the player on touch
+          }
+          _hurtPlayer(e.damage);
+          if (e.kind == 7) {
+            // VAMPIRE feeds: heal from the damage it dealt.
+            e.hp = (e.hp + e.damage * 0.8).clamp(0, e.maxHp).toDouble();
+          }
+        }
         if (_phase != Phase.playing) return;
       }
     }
@@ -1798,6 +1950,7 @@ class _GameScreenState extends State<GameScreen>
     _p.hp -= dmg;
     _p.hurtFlash = 0.25;
     _shake = max(_shake, 7.0);
+    _haptic(HapticFeedback.mediumImpact);
     _combo = 0;
     _comboT = 0;
     if (_p.hp <= 0) {
@@ -1818,6 +1971,8 @@ class _GameScreenState extends State<GameScreen>
 
   void _damageEnemy(Enemy e, double dmg, bool crit, [Offset? from]) {
     dmg *= _comboDmgMul;
+    // SHIELDED enemies absorb half the hit until their armor breaks at 50% HP.
+    if (e.kind == 5 && e.hp / e.maxHp > 0.5) dmg *= 0.5;
     e.hp -= dmg;
     e.flash = 0.1;
     _bursts.add(Burst(e.pos, crit ? 22 : 14));
@@ -1945,6 +2100,14 @@ class _GameScreenState extends State<GameScreen>
       (_phase == Phase.playing || _phase == Phase.roomCleared) &&
       _p.dashTimer <= 0;
 
+  // Trigger a haptic pulse on supported platforms; silently no-op on web.
+  void _haptic(Future<void> Function() impact) {
+    if (!Settings.haptics) return;
+    try {
+      impact();
+    } catch (_) {}
+  }
+
   void _dash() {
     if (!_canDash) return;
     final dir = _moveDir != Offset.zero ? _moveDir : _facing;
@@ -1954,6 +2117,7 @@ class _GameScreenState extends State<GameScreen>
     _p.dashTimer = _p.dashCd;
     _p.invuln = max(_p.invuln, 0.32); // i-frames
     Sfx.play('dash', vol: 0.55);
+    _haptic(HapticFeedback.lightImpact);
     _shake = max(_shake, 3.0);
     const dist = 150.0;
     for (var i = 0; i < 6; i++) {
@@ -2085,7 +2249,56 @@ class _GameScreenState extends State<GameScreen>
     }
 
     final roll = _rng.nextDouble();
-    if (_floorIdx >= 2 && roll < 0.16) {
+    if (_floorIdx >= 1 && roll < 0.08) {
+      // KAMIKAZE: fast and fragile, but explodes on touch.
+      _enemies.add(Enemy(
+        pos: p,
+        hp: (2 + _wave * 0.4) * f.hpMul,
+        speed: (110 + _wave * 1.4) * f.spdMul,
+        damage: 2.5 * f.dmgMul,
+        radius: 12,
+        kind: 8,
+        bounty: 2,
+        xp: _xpFor(1),
+      ));
+    } else if (_floorIdx >= 1 && roll < 0.16) {
+      // SHIELDED: tanky brute that halves damage above 50% HP.
+      _enemies.add(Enemy(
+        pos: p,
+        hp: (14 + _wave * 1.6) * f.hpMul * ws,
+        speed: (38 + _wave * 0.45) * f.spdMul,
+        damage: 2.5 * f.dmgMul,
+        radius: 25,
+        kind: 5,
+        bounty: 4,
+        xp: _xpFor(2),
+      ));
+    } else if (_floorIdx >= 2 && roll < 0.24) {
+      // FROST: chills the player's movement on contact.
+      _enemies.add(Enemy(
+        pos: p,
+        hp: (5 + _wave * 0.7) * f.hpMul,
+        speed: (60 + _wave * 0.9) * f.spdMul,
+        damage: 1.5 * f.dmgMul,
+        radius: 14,
+        kind: 6,
+        bounty: 2,
+        xp: _xpFor(1),
+      ));
+    } else if (_floorIdx >= 3 && roll < 0.31) {
+      // VAMPIRE: heals from contact damage dealt.
+      _enemies.add(Enemy(
+        pos: p,
+        hp: (7 + _wave * 1.0) * f.hpMul,
+        speed: (60 + _wave * 1.0) * f.spdMul,
+        damage: 1.6 * f.dmgMul,
+        radius: 16,
+        kind: 7,
+        bounty: 3,
+        xp: _xpFor(2),
+      ));
+    } else if (_floorIdx >= 2 && roll < 0.40) {
+      // Ranged shooter / kiter.
       _enemies.add(Enemy(
         pos: p,
         hp: (6 + _wave * 0.7) * f.hpMul,
@@ -2096,7 +2309,7 @@ class _GameScreenState extends State<GameScreen>
         bounty: 2,
         xp: _xpFor(4),
       ));
-    } else if (roll < 0.30 + _floorIdx * 0.02) {
+    } else if (roll < 0.55 + _floorIdx * 0.02) {
       _enemies.add(Enemy(
         pos: p,
         hp: (2 + _wave * 0.35) * f.hpMul * ws,
@@ -2107,7 +2320,7 @@ class _GameScreenState extends State<GameScreen>
         bounty: 1,
         xp: _xpFor(1),
       ));
-    } else if (roll < 0.44) {
+    } else if (roll < 0.72) {
       _enemies.add(Enemy(
         pos: p,
         hp: (9 + _wave * 1.4) * f.hpMul * ws,
@@ -2518,7 +2731,7 @@ class _GameScreenState extends State<GameScreen>
                       time: _elapsed,
                       facing: _facing,
                       moving: _moveDir != Offset.zero,
-                      shake: _shake,
+                      shake: Settings.shake ? _shake : 0.0,
                       lowHp: _ready && _p.hp / _p.maxHp < 0.3,
                       stickOn: _stickOn,
                       stickOrigin: _stickOrigin,
@@ -2537,6 +2750,7 @@ class _GameScreenState extends State<GameScreen>
                 if (_phase == Phase.levelUp) _levelUpOverlay(),
                 if (_phase == Phase.shop) _shopOverlay(),
                 if (_phase == Phase.shrine) _shrineOverlay(),
+                if (_ready && _showTutorial) _tutorialOverlay(),
                 if (_phase == Phase.gameOver) _endOverlay(false),
                 if (_phase == Phase.victory) _endOverlay(true),
               ],
@@ -2662,6 +2876,12 @@ class _GameScreenState extends State<GameScreen>
         const SizedBox(height: 24),
         _BigButton(
             label: 'RESUME', color: const Color(0xFFFFD45E), onTap: _resume),
+        const SizedBox(height: 12),
+        _BigButton(
+            label: 'SETTINGS',
+            color: const Color(0xFF8CC8FF),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => const SettingsScreen()))),
         const SizedBox(height: 12),
         _BigButton(
             label: 'RESTART',
@@ -2864,6 +3084,47 @@ class _GameScreenState extends State<GameScreen>
         ),
       ),
     );
+  }
+
+  Widget _tutorialOverlay() {
+    return _scrim(Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text('HOW TO PLAY',
+            style: TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFFFFD45E))),
+        const SizedBox(height: 14),
+        const Text('• drag anywhere to move (virtual stick)',
+            style: TextStyle(color: Colors.white, fontSize: 14)),
+        const SizedBox(height: 6),
+        const Text('• you auto-aim at the nearest enemy',
+            style: TextStyle(color: Colors.white, fontSize: 14)),
+        const SizedBox(height: 6),
+        const Text('• tap ⚡ to dash through danger (i-frames)',
+            style: TextStyle(color: Colors.white, fontSize: 14)),
+        const SizedBox(height: 6),
+        const Text('• tap ✦ for your hero ability',
+            style: TextStyle(color: Colors.white, fontSize: 14)),
+        const SizedBox(height: 6),
+        const Text('• clear the room, then walk into a door',
+            style: TextStyle(color: Colors.white, fontSize: 14)),
+        const SizedBox(height: 6),
+        const Text('• chain kills for STREAK and INFERNO buffs',
+            style: TextStyle(color: Color(0xFFFFD45E), fontSize: 14)),
+        const SizedBox(height: 22),
+        _BigButton(
+          label: "LET'S GO",
+          color: const Color(0xFFFFD45E),
+          onTap: () {
+            Settings.tutorialDone = true;
+            Settings.save();
+            setState(() => _showTutorial = false);
+          },
+        ),
+      ],
+    ));
   }
 
   Widget _shrineOverlay() {
@@ -3112,6 +3373,24 @@ final List<Upgrade> kUpgrades = [
       (p) => p.doomAmt += 7),
   Upgrade('ZEUS: CHAIN', 'attacks chain to +1 enemy', 2,
       (p) => p.zeus += 1),
+  // New boons
+  Upgrade('IRON GUT', '+5 max HP & full heal', 0, (p) {
+    p.maxHp += 5;
+    p.hp = p.maxHp;
+  }),
+  Upgrade('MANA TIDE', '+1.0 MP regen', 1, (p) => p.mpRegen += 1.0),
+  Upgrade('GLASS CANNON', '+50% damage, −25% max HP', 2, (p) {
+    p.damage *= 1.5;
+    p.maxHp = (p.maxHp * 0.75).clamp(1, 9999).toDouble();
+    p.hp = p.hp.clamp(1, p.maxHp).toDouble();
+  }),
+  Upgrade('SECOND WIND', '+1 Death Defiance', 2, (p) => p.revives += 1),
+  Upgrade('FROST WALKER', 'immune to chill', 1,
+      (p) => p.frostImmune = true),
+  Upgrade('HERMES: HASTE', '+30 move speed & −0.2s dash CD', 2, (p) {
+    p.speed += 30;
+    p.dashCd = (p.dashCd - 0.2).clamp(0.4, 5).toDouble();
+  }),
 ];
 
 class ShopItem {
@@ -3841,6 +4120,10 @@ class WorldPainter extends CustomPainter {
         2 => const Color(0xFF9B5CFF),
         3 => const Color(0xFFFF3B5C),
         4 => const Color(0xFF4CD2C0),
+        5 => const Color(0xFF9CA8B5), // SHIELDED — steel grey
+        6 => const Color(0xFFA9E8FF), // FROST — ice cyan
+        7 => const Color(0xFF8E1A2B), // VAMPIRE — blood red
+        8 => const Color(0xFFFF6432), // KAMIKAZE — fuse orange
         _ => floor.mob,
       };
       canvas.drawOval(
