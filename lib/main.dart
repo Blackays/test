@@ -2122,6 +2122,9 @@ class _GameScreenState extends State<GameScreen>
   double _freezeT = 0;
   String? _bossIntro;
   double _bossIntroT = 0;
+  String? _floorIntro;
+  double _floorIntroT = 0;
+  int _lastIntroFloor = -1;
   // Whichever enemy the auto-aim is locked onto this frame — drawn with a
   // subtle ring so the player can read where their next shot is going.
   Enemy? _aimAt;
@@ -2200,6 +2203,12 @@ class _GameScreenState extends State<GameScreen>
     _ballistas.clear();
     _bossSpawned = false;
     _spawnTimer = 0.6;
+    // Banner: when the player walks into the first room of a new floor.
+    if (_floorIdx != _lastIntroFloor) {
+      _lastIntroFloor = _floorIdx;
+      _floorIntro = 'F${_floorIdx + 1} · ${_floor.name}';
+      _floorIntroT = 2.4;
+    }
     var spawn = _bossWave ? 7 : (6 + _wave * 2).clamp(6, 26).toInt();
     if (_roomKind == RoomKind.treasure) spawn = 0;
     if (_roomKind == RoomKind.challenge) spawn = (spawn * 1.6).round();
@@ -2271,6 +2280,7 @@ class _GameScreenState extends State<GameScreen>
     Loadout.keepsake?.apply(_p);
     _wave = 1;
     _entryCorner = 2 + _rng.nextInt(2); // either lower-left or lower-right
+    _lastIntroFloor = -1; // force the F1 banner on the first room of a run
     _shake = 0;
     _combo = 0;
     _comboT = 0;
@@ -2296,6 +2306,7 @@ class _GameScreenState extends State<GameScreen>
       if (_shake < 0) _shake = 0;
     }
     if (_bossIntroT > 0) _bossIntroT -= dt;
+    if (_floorIntroT > 0) _floorIntroT -= dt;
     // Hit-stop: drain the freeze timer with real time, but pass dt=0 to
     // the simulation while it's active. Rendering keeps animating.
     if (_freezeT > 0) {
@@ -2870,6 +2881,9 @@ class _GameScreenState extends State<GameScreen>
     e.hp -= dmg;
     e.flash = 0.1;
     _bursts.add(Burst(e.pos, crit ? 22 : 14));
+    // Crits get a second, larger ring on top of the standard burst so the
+    // hit reads even through crowded combat.
+    if (crit) _bursts.add(Burst(e.pos, 44));
     Sfx.play('hit',
         vol: crit ? 0.7 : 0.45,
         pitch: crit ? 1.25 : 1.0,
@@ -3795,6 +3809,11 @@ class _GameScreenState extends State<GameScreen>
                 if (_ready) _bossBar(),
                 if (_ready && _bossIntroT > 0 && _bossIntro != null)
                   _bossIntroOverlay(),
+                if (_ready &&
+                    _floorIntroT > 0 &&
+                    _floorIntro != null &&
+                    _bossIntroT <= 0)
+                  _floorIntroOverlay(),
                 if (_ready && _phase == Phase.playing) _abilityButton(),
                 if (_ready && play) _dashButton(),
                 if (_ready && play) _pauseButton(),
@@ -3951,6 +3970,45 @@ class _GameScreenState extends State<GameScreen>
         ),
       ],
     ));
+  }
+
+  // Slides in for ~2.4s when the player enters a new floor's first room.
+  Widget _floorIntroOverlay() {
+    final t = _floorIntroT;
+    final entry = (2.4 - t).clamp(0.0, 0.45) / 0.45;
+    final fade = t < 0.8 ? (t / 0.8).clamp(0.0, 1.0) : 1.0;
+    final xOffset = (1 - entry) * -36.0;
+    return Positioned(
+      top: 110,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        ignoring: true,
+        child: Transform.translate(
+          offset: Offset(xOffset, 0),
+          child: Opacity(
+            opacity: fade,
+            child: Column(children: [
+              const Text('— ENTERING FLOOR —',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: Color(0xFF8CC8FF),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                      letterSpacing: 5)),
+              const SizedBox(height: 4),
+              Text(_floorIntro!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Color(0xFFFFD45E),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 22,
+                      letterSpacing: 1.5)),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 
   // Slides in for ~2.4s when a boss spawns, fading the last second.
@@ -5616,12 +5674,23 @@ class WorldPainter extends CustomPainter {
     }
     for (final g in ghosts) {
       add(dep(g.pos), () => _projAt(canvas, g.pos, 0, () {
-      final k = (g.life / 0.3).clamp(0.0, 1.0).toDouble();
-      canvas.drawCircle(
-          g.pos,
-          player.radius,
-          Paint()
-            ..color = const Color(0xFF8CC8FF).withValues(alpha: 0.28 * k));
+        final k = (g.life / 0.3).clamp(0.0, 1.0).toDouble();
+        // Tinted ghost body plus a brighter highlight ring for a stronger
+        // streak read during the 6-step dash burst.
+        canvas.drawCircle(
+            g.pos,
+            player.radius,
+            Paint()
+              ..color =
+                  const Color(0xFF8CC8FF).withValues(alpha: 0.30 * k));
+        canvas.drawCircle(
+            g.pos,
+            player.radius + 2,
+            Paint()
+              ..color =
+                  const Color(0xFFE0F2FF).withValues(alpha: 0.55 * k)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.4);
       }));
     }
     add(dep(player.pos), () {
