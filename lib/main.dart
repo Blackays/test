@@ -2116,9 +2116,11 @@ class _GameScreenState extends State<GameScreen>
   int _combo = 0;
   double _comboT = 0;
   RoomKind _roomKind = RoomKind.normal;
-  // Hades-style room flow: the player spawns on `_entrySide` of the map and
-  // exit doors carve through the opposite wall. 0=left, 1=top, 2=right, 3=bottom.
-  int _entrySide = 3;
+  // Hades-style room flow. Player spawns at one of the two LOWER corners
+  // (2 = lower-left, 3 = lower-right) and the exit portals appear at the
+  // diagonally opposite UPPER corner (0 = upper-left, 1 = upper-right).
+  int _entryCorner = 2;
+  int get _exitCorner => (_entryCorner + 2) % 4;
   double get _comboFireMul =>
       _combo >= 25 ? 0.7 : (_combo >= 10 ? 0.85 : 1.0);
   double get _comboDmgMul =>
@@ -2171,7 +2173,7 @@ class _GameScreenState extends State<GameScreen>
     _flow = null;
     _flowFromCell = -1;
     _map = GameMap.generate(_rng, _size.width, _size.height, _wave);
-    final entryPos = _edgeSpawn(_entrySide);
+    final entryPos = _cornerSpawn(_entryCorner);
     _p.pos = entryPos;
     _map.clearDisk(_p.pos.dx, _p.pos.dy, 3.2); // wide gateway in the entry wall
     _enemies.clear();
@@ -2259,7 +2261,7 @@ class _GameScreenState extends State<GameScreen>
     _p = Player(widget.def);
     Loadout.keepsake?.apply(_p);
     _wave = 1;
-    _entrySide = _rng.nextInt(4); // first room's entry wall is random
+    _entryCorner = 2 + _rng.nextInt(2); // either lower-left or lower-right
     _shake = 0;
     _combo = 0;
     _comboT = 0;
@@ -2806,7 +2808,16 @@ class _GameScreenState extends State<GameScreen>
 
     final treasureWait =
         _roomKind == RoomKind.treasure && _orbs.isNotEmpty;
-    if (_toSpawn <= 0 && _enemies.isEmpty && !treasureWait) _roomEnd();
+    // Only fire room-end once. Without the phase gate, picking up the last
+    // XP orb (or any tick after clear) re-runs _roomEnd and re-rolls the
+    // exit doors — which is what was making the portals change on the
+    // player after they appeared.
+    if (_phase == Phase.playing &&
+        _toSpawn <= 0 &&
+        _enemies.isEmpty &&
+        !treasureWait) {
+      _roomEnd();
+    }
   }
 
   void _hurtPlayer(double dmg) {
@@ -3105,7 +3116,7 @@ class _GameScreenState extends State<GameScreen>
       _enemies.add(Enemy(
         pos: p,
         hp: (26 + _wave * 5) * f.hpMul * Loadout.enemyMul,
-        speed: (44 + _wave * 1.2) * f.spdMul,
+        speed: (70 + _wave * 1.4) * f.spdMul,
         damage: 2.5 * f.dmgMul * Loadout.enemyMul,
         radius: 36,
         kind: 3,
@@ -3121,7 +3132,7 @@ class _GameScreenState extends State<GameScreen>
       _enemies.add(Enemy(
         pos: p,
         hp: (2 + _wave * 0.4) * f.hpMul,
-        speed: (110 + _wave * 1.4) * f.spdMul,
+        speed: (150 + _wave * 1.6) * f.spdMul,
         damage: 2.5 * f.dmgMul,
         radius: 12,
         kind: 8,
@@ -3133,7 +3144,7 @@ class _GameScreenState extends State<GameScreen>
       _enemies.add(Enemy(
         pos: p,
         hp: (14 + _wave * 1.6) * f.hpMul * ws,
-        speed: (38 + _wave * 0.45) * f.spdMul,
+        speed: (66 + _wave * 0.6) * f.spdMul,
         damage: 2.5 * f.dmgMul,
         radius: 25,
         kind: 5,
@@ -3145,7 +3156,7 @@ class _GameScreenState extends State<GameScreen>
       _enemies.add(Enemy(
         pos: p,
         hp: (5 + _wave * 0.7) * f.hpMul,
-        speed: (60 + _wave * 0.9) * f.spdMul,
+        speed: (95 + _wave * 1.0) * f.spdMul,
         damage: 1.5 * f.dmgMul,
         radius: 14,
         kind: 6,
@@ -3157,7 +3168,7 @@ class _GameScreenState extends State<GameScreen>
       _enemies.add(Enemy(
         pos: p,
         hp: (7 + _wave * 1.0) * f.hpMul,
-        speed: (60 + _wave * 1.0) * f.spdMul,
+        speed: (95 + _wave * 1.1) * f.spdMul,
         damage: 1.6 * f.dmgMul,
         radius: 16,
         kind: 7,
@@ -3169,7 +3180,7 @@ class _GameScreenState extends State<GameScreen>
       _enemies.add(Enemy(
         pos: p,
         hp: (6 + _wave * 0.7) * f.hpMul,
-        speed: (70 + _wave * 0.6) * f.spdMul,
+        speed: (105 + _wave * 0.8) * f.spdMul,
         damage: 1.0 * f.dmgMul,
         radius: 14,
         kind: 4,
@@ -3180,7 +3191,7 @@ class _GameScreenState extends State<GameScreen>
       _enemies.add(Enemy(
         pos: p,
         hp: (2 + _wave * 0.35) * f.hpMul * ws,
-        speed: (120 + _wave * 1.6) * f.spdMul,
+        speed: (160 + _wave * 1.8) * f.spdMul,
         damage: 1.0 * f.dmgMul,
         radius: 11,
         kind: 1,
@@ -3191,7 +3202,7 @@ class _GameScreenState extends State<GameScreen>
       _enemies.add(Enemy(
         pos: p,
         hp: (9 + _wave * 1.4) * f.hpMul * ws,
-        speed: (46 + _wave * 0.7) * f.spdMul,
+        speed: (78 + _wave * 0.9) * f.spdMul,
         damage: 2.0 * f.dmgMul,
         radius: 23,
         kind: 2,
@@ -3202,7 +3213,7 @@ class _GameScreenState extends State<GameScreen>
       _enemies.add(Enemy(
         pos: p,
         hp: (3 + _wave * 0.8) * f.hpMul * ws,
-        speed: (66 + _wave * 1.1) * f.spdMul,
+        speed: (102 + _wave * 1.3) * f.spdMul,
         damage: 1.0 * f.dmgMul,
         radius: 15,
         kind: 0,
@@ -3332,18 +3343,17 @@ class _GameScreenState extends State<GameScreen>
     }
     if (_wave - 1 > GameStats.bestWave) GameStats.bestWave = _wave - 1;
     _doors.clear();
-    final exitSide = _oppositeSide(_entrySide);
     if (_bossWave) {
-      final slots = _edgeDoorSlots(exitSide, 1);
+      final slots = _cornerDoorSlots(_exitCorner, 1);
       _doors.add(Door(
         slots.isNotEmpty ? slots.first : _map.roomCenter(_map.rooms.length - 1),
         DoorDef('🛒', "CHARON'S SHOP", 'spend your obols', DoorKind.shop,
             (_) {}),
       ));
     } else {
-      final n = 2 + _rng.nextInt(2); // 2 or 3 doors on the exit wall
+      final n = 2 + _rng.nextInt(2); // 2 or 3 portals at the opposite corner
       final picks = _rollDoorDefs(n);
-      final slots = _edgeDoorSlots(exitSide, n);
+      final slots = _cornerDoorSlots(_exitCorner, n);
       for (var i = 0; i < n && i < slots.length; i++) {
         _doors.add(Door(slots[i], picks[i]));
       }
@@ -3445,9 +3455,9 @@ class _GameScreenState extends State<GameScreen>
   void _nextRoom() {
     _wave++;
     _p.hp = (_p.hp + _p.maxHp * 0.12).clamp(0, _p.maxHp).toDouble();
-    // Each new room flips the spawn side: you arrive from the wall opposite
-    // the door you just walked through, then exit through the far wall again.
-    _entrySide = _oppositeSide(_entrySide);
+    // Re-randomize the lower-corner entry each room so left/right alternates
+    // unpredictably; portals always land at the opposite upper corner.
+    _entryCorner = 2 + _rng.nextInt(2);
     _genRoom();
     if (_roomKind == RoomKind.shrine) {
       _openShrine();
@@ -3456,37 +3466,29 @@ class _GameScreenState extends State<GameScreen>
     }
   }
 
-  int _oppositeSide(int s) => (s + 2) % 4;
+  // Returns the (col, row) of the chosen corner of the floor bounding box.
+  // Corner ids: 0=upper-left, 1=upper-right, 2=lower-left, 3=lower-right.
+  (int, int) _cornerCell(int corner, Rect b) {
+    final tc = (corner == 0 || corner == 2) ? b.left.toInt() : b.right.toInt();
+    final tr = (corner == 0 || corner == 1) ? b.top.toInt() : b.bottom.toInt();
+    return (tc, tr);
+  }
 
-  // Find a floor tile pressed against the chosen edge of the map's floor
-  // bounding box, biased toward the perpendicular middle so the gateway
-  // lines up visually with the wall it sits in.
-  Offset _edgeSpawn(int side) {
+  // Picks the floor tile closest to the requested corner (Manhattan), so
+  // the player spawns tucked into that corner of the playable area.
+  Offset _cornerSpawn(int corner) {
     final b = _floorBounds();
     if (b == null) return _map.roomCenter(0);
     final cell = _map.cell;
-    final isVertical = side == 0 || side == 2;
-    final minC = b.left.toInt(),
-        maxC = b.right.toInt(),
-        minR = b.top.toInt(),
-        maxR = b.bottom.toInt();
+    final (tc, tr) = _cornerCell(corner, b);
     Point<int>? best;
-    int bestPerp = 1 << 30;
-    final midR = (minR + maxR) ~/ 2;
-    final midC = (minC + maxC) ~/ 2;
-    for (int r = minR; r <= maxR; r++) {
-      for (int c = minC; c <= maxC; c++) {
+    int bestDist = 1 << 30;
+    for (int r = b.top.toInt(); r <= b.bottom.toInt(); r++) {
+      for (int c = b.left.toInt(); c <= b.right.toInt(); c++) {
         if (_map.tt(c, r) != 1) continue;
-        final edgeDist = switch (side) {
-          0 => c - minC,
-          1 => r - minR,
-          2 => maxC - c,
-          _ => maxR - r,
-        };
-        if (edgeDist > 2) continue;
-        final perp = isVertical ? (r - midR).abs() : (c - midC).abs();
-        if (perp < bestPerp) {
-          bestPerp = perp;
+        final d = (c - tc).abs() + (r - tr).abs();
+        if (d < bestDist) {
+          bestDist = d;
           best = Point(c, r);
         }
       }
@@ -3495,67 +3497,38 @@ class _GameScreenState extends State<GameScreen>
     return Offset((best.x + 0.5) * cell, (best.y + 0.5) * cell);
   }
 
-  // Evenly distribute `n` door anchors along the floor edge on `side`,
-  // each snapped to the most edgeward floor tile in its slice. Doors land
-  // on the last walkable tile so clearDisk later carves a notch in the wall.
-  List<Offset> _edgeDoorSlots(int side, int n) {
+  // Picks up to `n` floor tiles near the corner, ranked by Manhattan
+  // distance to it and spaced out by ~2.5 cells so the portals don't all
+  // pile on top of each other.
+  List<Offset> _cornerDoorSlots(int corner, int n) {
     final b = _floorBounds();
     if (b == null) return const [];
     final cell = _map.cell;
-    final isVertical = side == 0 || side == 2;
-    final minC = b.left.toInt(),
-        maxC = b.right.toInt(),
-        minR = b.top.toInt(),
-        maxR = b.bottom.toInt();
-    final line = <Point<int>>[];
-    if (isVertical) {
-      for (int r = minR; r <= maxR; r++) {
-        int? hit;
-        if (side == 0) {
-          for (int c = minC; c <= maxC; c++) {
-            if (_map.tt(c, r) == 1) {
-              hit = c;
-              break;
-            }
-          }
-        } else {
-          for (int c = maxC; c >= minC; c--) {
-            if (_map.tt(c, r) == 1) {
-              hit = c;
-              break;
-            }
-          }
-        }
-        if (hit != null) line.add(Point(hit, r));
-      }
-    } else {
-      for (int c = minC; c <= maxC; c++) {
-        int? hit;
-        if (side == 1) {
-          for (int r = minR; r <= maxR; r++) {
-            if (_map.tt(c, r) == 1) {
-              hit = r;
-              break;
-            }
-          }
-        } else {
-          for (int r = maxR; r >= minR; r--) {
-            if (_map.tt(c, r) == 1) {
-              hit = r;
-              break;
-            }
-          }
-        }
-        if (hit != null) line.add(Point(c, hit));
+    final (tc, tr) = _cornerCell(corner, b);
+    final candidates = <(int, int, int)>[]; // (distance, c, r)
+    for (int r = b.top.toInt(); r <= b.bottom.toInt(); r++) {
+      for (int c = b.left.toInt(); c <= b.right.toInt(); c++) {
+        if (_map.tt(c, r) != 1) continue;
+        final d = (c - tc).abs() + (r - tr).abs();
+        candidates.add((d, c, r));
       }
     }
-    if (line.isEmpty) return const [];
+    candidates.sort((a, b) => a.$1.compareTo(b.$1));
     final picks = <Offset>[];
-    for (int i = 0; i < n; i++) {
-      final t = (i + 1) / (n + 1);
-      final idx = (t * line.length).floor().clamp(0, line.length - 1);
-      final tile = line[idx];
-      picks.add(Offset((tile.x + 0.5) * cell, (tile.y + 0.5) * cell));
+    final minSep = cell * 2.5;
+    for (final (_, c, r) in candidates) {
+      final pos = Offset((c + 0.5) * cell, (r + 0.5) * cell);
+      var ok = true;
+      for (final p in picks) {
+        if ((p - pos).distance < minSep) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) {
+        picks.add(pos);
+        if (picks.length >= n) break;
+      }
     }
     return picks;
   }
