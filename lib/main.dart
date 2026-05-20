@@ -513,6 +513,21 @@ const List<FloorDef> kFloors = [
   ),
 ];
 
+// The HomeRoom uses a non-combat palette: warm stone + amber so the player
+// can read at a glance that they're safely back at base between runs.
+const FloorDef kHomeFloor = FloorDef(
+  name: 'HOME',
+  bg: Color(0xFF3A2D1F),
+  voidc: Color(0xFF14100A),
+  grid: Color(0xFF5C4830),
+  mob: Color(0xFFFFD45E),
+  prop: Color(0xFF6C4F2E),
+  pool: Color(0xFF8C6633),
+  hpMul: 1.0,
+  spdMul: 1.0,
+  dmgMul: 1.0,
+);
+
 const int kWavesPerFloor = 5;
 final int kMaxWaves = kFloors.length * kWavesPerFloor;
 
@@ -681,144 +696,405 @@ class _TitleScreenState extends State<TitleScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text('BUFF BATTLE',
-                style: TextStyle(
-                    fontSize: 44,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 2,
-                    color: Color(0xFFFFD45E))),
-            const SizedBox(height: 6),
-            const Text('pick a class · clear the rooms · get swole',
-                style: TextStyle(color: Colors.white54, fontSize: 13)),
-            const SizedBox(height: 36),
-            _BigButton(
-              label: 'PLAY',
-              color: const Color(0xFFFFD45E),
-              onTap: () {
-                Loadout.dailySeed = null;
-                Loadout.dailyKey = null;
-                platform_fs.enterFullscreen();
-                Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => const CharacterSelectScreen()));
-              },
-            ),
-            const SizedBox(height: 10),
-            _BigButton(
-              label: '🌞 DAILY CHALLENGE',
-              color: const Color(0xFFFF8A4C),
-              onTap: () {
-                Loadout.dailyKey = Loadout.todayKey();
-                Loadout.dailySeed = Loadout.todaySeed();
-                platform_fs.enterFullscreen();
-                Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => const CharacterSelectScreen()));
-              },
-            ),
-            if (GameStats.dailyBest[Loadout.todayKey()] != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                    "today's best: ${GameStats.dailyBest[Loadout.todayKey()]}",
-                    style: const TextStyle(
-                        color: Color(0xFFFF8A4C), fontSize: 11)),
-              ),
-            const SizedBox(height: 10),
-            _BigButton(
-              label: 'HOME (UPGRADES)',
-              color: const Color(0xFF8CC8FF),
-              onTap: () async {
-                await Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => const HomeScreen()));
-                if (mounted) setState(() {});
-              },
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _SmallChip(
-                    icon: Icons.menu_book_outlined,
-                    label: 'BESTIARY',
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                              builder: (_) => const BestiaryScreen()));
-                      if (mounted) setState(() {});
-                    }),
-                const SizedBox(width: 10),
-                _SmallChip(
-                    icon: Icons.emoji_events_outlined,
-                    label:
-                        'ACHIEVEMENTS ${GameStats.achievements.length}/${kAchievements.length}',
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                              builder: (_) => const AchievementsScreen()));
-                      if (mounted) setState(() {});
-                    }),
-                const SizedBox(width: 10),
-                _SmallChip(
-                    icon: Icons.settings_outlined,
-                    label: 'SETTINGS',
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                              builder: (_) => const SettingsScreen()));
-                      if (mounted) setState(() {});
-                    }),
-              ],
-            ),
-            const SizedBox(height: 18),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.remove_circle_outline),
-                  color: Colors.white70,
-                  onPressed: () => setState(() => Loadout.heat =
-                      (Loadout.heat - 1).clamp(0, 10).toInt()),
-                ),
-                Text('🔥 HEAT ${Loadout.heat}',
-                    style: const TextStyle(
-                        color: Color(0xFFFF8A4C),
-                        fontWeight: FontWeight.w900)),
-                IconButton(
-                  icon: const Icon(Icons.add_circle_outline),
-                  color: Colors.white70,
-                  onPressed: () => setState(() => Loadout.heat =
-                      (Loadout.heat + 1).clamp(0, 10).toInt()),
-                ),
-              ],
-            ),
-            Text(
-                'enemies ×${Loadout.enemyMul.toStringAsFixed(2)}  ·  '
-                'shards ×${Loadout.rewardMul.toStringAsFixed(2)}',
-                style: const TextStyle(color: Colors.white38, fontSize: 11)),
-            const SizedBox(height: 12),
-            Text('🔷 ${MetaStore.shards} shards',
-                style: const TextStyle(color: Color(0xFF8CC8FF))),
-            if (GameStats.totalRuns > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Column(children: [
-                  Text(
-                      'best: floor ${GameStats.bestFloor}'
-                      ' · room ${GameStats.bestWave}',
-                      style: const TextStyle(color: Colors.white38)),
-                  Text(
-                      '${GameStats.totalRuns} runs · '
-                      '${GameStats.totalKills} total kills',
-                      style:
-                          const TextStyle(color: Colors.white24, fontSize: 11)),
-                ]),
-              ),
-          ],
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          platform_fs.enterFullscreen();
+          Navigator.of(context).pushReplacement(
+              MaterialPageRoute<void>(builder: (_) => const HomeRoomScreen()));
+        },
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('BUFF BATTLE',
+                  style: TextStyle(
+                      fontSize: 56,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 3,
+                      color: Color(0xFFFFD45E))),
+              const SizedBox(height: 8),
+              const Text('pick a class · clear the rooms · get swole',
+                  style: TextStyle(color: Colors.white54, fontSize: 13)),
+              const SizedBox(height: 36),
+              const Text('TAP TO ENTER',
+                  style: TextStyle(
+                      color: Color(0xFF8CC8FF),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 16,
+                      letterSpacing: 3)),
+              const SizedBox(height: 40),
+              if (GameStats.totalRuns > 0)
+                Text(
+                    'best: floor ${GameStats.bestFloor} · room ${GameStats.bestWave}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 11)),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// ---------------------------------------------------------------------------
+/// Home Room — the walkable hub that replaces the menu screen. Each altar
+/// is a Door instance; stepping into one navigates to its sub-screen.
+/// ---------------------------------------------------------------------------
+class HomeRoomScreen extends StatefulWidget {
+  const HomeRoomScreen({super.key});
+  @override
+  State<HomeRoomScreen> createState() => _HomeRoomScreenState();
+}
+
+class _HomeRoomScreenState extends State<HomeRoomScreen>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker;
+  Duration _last = Duration.zero;
+  GameMap? _map;
+  Player? _p;
+  final List<Door> _altars = [];
+  final Map<Door, double> _cool = {};
+  Offset _moveDir = Offset.zero;
+  Offset _facing = const Offset(1, 0);
+  double _elapsed = 0;
+  Size _size = Size.zero;
+  bool _ready = false;
+  Door? _near;
+
+  static const double _stickR = 60;
+  bool _stickOn = false;
+  Offset _stickOrigin = Offset.zero;
+  Offset _stickKnob = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker(_onTick)..start();
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    WorldPainter.resetCaches();
+    super.dispose();
+  }
+
+  void _build() {
+    WorldPainter.resetCaches();
+    const cell = 60.0;
+    const cols = 18, rows = 12;
+    final m = GameMap(cols, rows, cell);
+    for (int c = 2; c < cols - 2; c++) {
+      for (int r = 2; r < rows - 2; r++) {
+        m.set(c, r, 1);
+      }
+    }
+    m.rooms.add(Rect.fromLTWH(
+        2, 2, (cols - 4).toDouble(), (rows - 4).toDouble()));
+    _map = m;
+
+    final player = Player(kHeroes.first);
+    player.pos = m.roomCenter(0);
+    _p = player;
+
+    final w = m.worldW, h = m.worldH;
+    final cy = h / 2, cx = w / 2;
+    _altars
+      ..clear()
+      ..addAll([
+        Door(
+          Offset(w * 0.22, cy),
+          DoorDef('🪞', 'MIRROR OF GAINS', 'permanent stat upgrades',
+              DoorKind.shop, (_) {}),
+        ),
+        Door(
+          Offset(w * 0.78, cy),
+          DoorDef('🌞', 'DAILY CHALLENGE',
+              "today's seeded dungeon", DoorKind.shrine, (_) {}),
+        ),
+        Door(
+          Offset(cx, h * 0.25),
+          DoorDef('⚙', 'SETTINGS', 'audio · shake · haptics',
+              DoorKind.shrine, (_) {}),
+        ),
+        Door(
+          Offset(w * 0.38, h * 0.25),
+          DoorDef(
+              '📖', 'BESTIARY', "foes you've faced", DoorKind.shrine, (_) {}),
+        ),
+        Door(
+          Offset(w * 0.62, h * 0.25),
+          DoorDef(
+              '🏆',
+              'ACHIEVEMENTS',
+              '${GameStats.achievements.length}/${kAchievements.length}',
+              DoorKind.shrine, (_) {}),
+        ),
+        Door(
+          Offset(cx, h * 0.78),
+          DoorDef('⚔', 'BEGIN RUN', 'fight through the dungeon',
+              DoorKind.reward, (_) {}),
+        ),
+      ]);
+    for (final a in _altars) {
+      _cool[a] = 0;
+    }
+    _ready = true;
+  }
+
+  void _onTick(Duration elapsed) {
+    if (!_ready || _map == null || _p == null) {
+      _last = elapsed;
+      return;
+    }
+    var dt = (elapsed - _last).inMicroseconds / 1e6;
+    _last = elapsed;
+    if (dt > 1 / 30) dt = 1 / 30;
+    _elapsed += dt;
+    for (final a in _altars) {
+      final c = _cool[a];
+      if (c != null && c > 0) _cool[a] = c - dt;
+    }
+    final p = _p!;
+    if (_moveDir != Offset.zero) {
+      p.pos = _slide(p.pos, _moveDir * p.speed * dt, p.radius * 0.7);
+      _facing = _moveDir;
+    }
+    Door? closest;
+    var closestD = 1e9;
+    for (final a in _altars) {
+      final d = (a.pos - p.pos).distance;
+      if (d < closestD) {
+        closestD = d;
+        closest = a;
+      }
+    }
+    _near = (closest != null && closestD < 80) ? closest : null;
+    if (closest != null &&
+        closestD < p.radius + closest.r * 0.7 &&
+        (_cool[closest] ?? 0) <= 0) {
+      _cool[closest] = 1.6;
+      _activate(closest);
+    }
+    setState(() {});
+  }
+
+  Future<void> _activate(Door a) async {
+    final label = a.def.title;
+    Widget? route;
+    bool resetOnReturn = true;
+    if (label == 'BEGIN RUN') {
+      Loadout.dailySeed = null;
+      Loadout.dailyKey = null;
+      platform_fs.enterFullscreen();
+      route = const CharacterSelectScreen();
+    } else if (label == 'DAILY CHALLENGE') {
+      Loadout.dailyKey = Loadout.todayKey();
+      Loadout.dailySeed = Loadout.todaySeed();
+      platform_fs.enterFullscreen();
+      route = const CharacterSelectScreen();
+    } else if (label == 'MIRROR OF GAINS') {
+      route = const HomeScreen();
+    } else if (label == 'BESTIARY') {
+      route = const BestiaryScreen();
+      resetOnReturn = false;
+    } else if (label == 'ACHIEVEMENTS') {
+      route = const AchievementsScreen();
+    } else if (label == 'SETTINGS') {
+      route = const SettingsScreen();
+      resetOnReturn = false;
+    }
+    if (route == null) return;
+    final w = route;
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => w));
+    if (!mounted) return;
+    if (resetOnReturn) {
+      setState(_build);
+    } else {
+      setState(() {});
+    }
+  }
+
+  bool _free(Offset p, double rad) {
+    final m = _map;
+    if (m == null) return false;
+    return m.walkable(p.dx, p.dy) &&
+        m.walkable(p.dx - rad, p.dy) &&
+        m.walkable(p.dx + rad, p.dy) &&
+        m.walkable(p.dx, p.dy - rad) &&
+        m.walkable(p.dx, p.dy + rad);
+  }
+
+  Offset _slide(Offset pos, Offset delta, double rad) {
+    var nx = pos.dx;
+    var ny = pos.dy;
+    if (_free(Offset(pos.dx + delta.dx, pos.dy), rad)) nx = pos.dx + delta.dx;
+    if (_free(Offset(nx, pos.dy + delta.dy), rad)) ny = pos.dy + delta.dy;
+    return Offset(nx, ny);
+  }
+
+  void _panStart(DragStartDetails d) {
+    _stickOn = true;
+    _stickOrigin = d.localPosition;
+    _stickKnob = d.localPosition;
+  }
+
+  void _panUpdate(DragUpdateDetails d) {
+    if (!_stickOn) return;
+    var delta = d.localPosition - _stickOrigin;
+    if (delta.distance > _stickR) {
+      delta = delta / delta.distance * _stickR;
+    }
+    _stickKnob = _stickOrigin + delta;
+    final screen = delta / _stickR;
+    final world = isoUnproject(screen);
+    _moveDir = world == Offset.zero
+        ? Offset.zero
+        : world / world.distance * screen.distance;
+  }
+
+  void _panEnd(_) {
+    _stickOn = false;
+    _moveDir = Offset.zero;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: LayoutBuilder(builder: (context, c) {
+        final s = Size(c.maxWidth, c.maxHeight);
+        if (s != _size) {
+          _size = s;
+          if (!_ready) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(_build);
+            });
+          }
+        }
+        return GestureDetector(
+          onPanStart: _panStart,
+          onPanUpdate: _panUpdate,
+          onPanEnd: _panEnd,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    isComplex: true,
+                    willChange: true,
+                    painter: WorldPainter(
+                      player: _p ?? Player(kHeroes.first),
+                      enemies: const <Enemy>[],
+                      bolts: const <Bolt>[],
+                      ebolts: const <EBolt>[],
+                      orbs: const <Orb>[],
+                      hearts: const <Heart>[],
+                      bursts: const <Burst>[],
+                      texts: const <FloatText>[],
+                      doors: _altars,
+                      swings: const <Swing>[],
+                      ghosts: const <Ghost>[],
+                      traps: const <Trap>[],
+                      ballistas: const <Ballista>[],
+                      map: _ready ? _map : null,
+                      floor: kHomeFloor,
+                      time: _elapsed,
+                      facing: _facing,
+                      moving: _moveDir != Offset.zero,
+                      shake: 0,
+                      lowHp: false,
+                      stickOn: _stickOn,
+                      stickOrigin: _stickOrigin,
+                      stickKnob: _stickKnob,
+                      ready: _ready,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 14,
+                left: 0,
+                right: 0,
+                child: Column(children: [
+                  const Text('HOUSE OF GAINS',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          color: Color(0xFFFFD45E),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 18,
+                          letterSpacing: 3)),
+                  const SizedBox(height: 2),
+                  Text(
+                      _near != null
+                          ? '${_near!.def.title} — step in to use'
+                          : 'drag to walk · step into an altar',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          color: _near != null
+                              ? const Color(0xFFFFD45E)
+                              : Colors.white54,
+                          fontSize: 11)),
+                ]),
+              ),
+              Positioned(
+                top: 14,
+                right: 16,
+                child: Text('🔷 ${MetaStore.shards}',
+                    style: const TextStyle(
+                        color: Color(0xFF8CC8FF),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14)),
+              ),
+              Positioned(
+                bottom: 16,
+                right: 16,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xCC14131F),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFFF8A4C)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    InkWell(
+                      onTap: () => setState(() => Loadout.heat =
+                          (Loadout.heat - 1).clamp(0, 10).toInt()),
+                      child: const Icon(Icons.remove,
+                          size: 18, color: Colors.white70),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('🔥 HEAT ${Loadout.heat}',
+                        style: const TextStyle(
+                            color: Color(0xFFFF8A4C),
+                            fontWeight: FontWeight.w900,
+                            fontSize: 12)),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () => setState(() => Loadout.heat =
+                          (Loadout.heat + 1).clamp(0, 10).toInt()),
+                      child: const Icon(Icons.add,
+                          size: 18, color: Colors.white70),
+                    ),
+                  ]),
+                ),
+              ),
+              if (Loadout.dailyKey != null &&
+                  GameStats.dailyBest[Loadout.todayKey()] != null)
+                Positioned(
+                  bottom: 16,
+                  left: 16,
+                  child: Text(
+                      "today's best · ${GameStats.dailyBest[Loadout.todayKey()]}",
+                      style: const TextStyle(
+                          color: Color(0xFFFF8A4C), fontSize: 11)),
+                ),
+            ],
+          ),
+        );
+      }),
     );
   }
 }
@@ -3543,10 +3819,10 @@ class _GameScreenState extends State<GameScreen>
             onTap: () => setState(_initRun)),
         const SizedBox(height: 12),
         _BigButton(
-          label: 'QUIT TO MENU',
+          label: 'BACK HOME',
           color: const Color(0xFF8CC8FF),
           onTap: () => Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute<void>(builder: (_) => const TitleScreen()),
+            MaterialPageRoute<void>(builder: (_) => const HomeRoomScreen()),
             (r) => false,
           ),
         ),
@@ -4005,10 +4281,10 @@ class _GameScreenState extends State<GameScreen>
             onTap: () => setState(_initRun)),
         const SizedBox(height: 12),
         _BigButton(
-          label: 'HOME / MENU',
+          label: 'BACK HOME',
           color: const Color(0xFF8CC8FF),
           onTap: () => Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute<void>(builder: (_) => const TitleScreen()),
+            MaterialPageRoute<void>(builder: (_) => const HomeRoomScreen()),
             (r) => false,
           ),
         ),
@@ -4144,40 +4420,6 @@ class _UpgradeCard extends StatelessWidget {
                 style: const TextStyle(color: Colors.white60, fontSize: 13)),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _SmallChip extends StatelessWidget {
-  const _SmallChip(
-      {required this.icon, required this.label, required this.onTap});
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1F1D2E),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFF8CC8FF), width: 1),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 16, color: const Color(0xFF8CC8FF)),
-          const SizedBox(width: 6),
-          Text(label,
-              style: const TextStyle(
-                  color: Color(0xFF8CC8FF),
-                  fontWeight: FontWeight.w900,
-                  fontSize: 11,
-                  letterSpacing: 0.8)),
-        ]),
       ),
     );
   }
