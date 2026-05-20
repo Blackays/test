@@ -1488,17 +1488,32 @@ class _HeroCard extends StatelessWidget {
           MaterialPageRoute<void>(builder: (_) => KeepsakeScreen(def: def))),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF1F1D2E),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xFF1F1D2E),
+              const Color(0xFF14131F),
+            ],
+          ),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: def.accent, width: 2),
+          border: Border.all(color: const Color(0xFFB58435), width: 1.4),
+          boxShadow: [
+            BoxShadow(
+              color: def.accent.withValues(alpha: 0.18),
+              blurRadius: 14,
+            ),
+          ],
         ),
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(14, 14, 18, 14),
         child: Row(
           children: [
             SizedBox(
-              width: 80,
-              height: 80,
-              child: CustomPaint(painter: HeroPreviewPainter(def: def)),
+              width: 140,
+              height: 170,
+              child: CustomPaint(
+                painter: HeroMedallionPainter(def: def, label: def.role),
+              ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -1506,50 +1521,77 @@ class _HeroCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(def.name,
-                            style: TextStyle(
-                                fontSize: 19,
-                                fontWeight: FontWeight.w900,
-                                color: def.body)),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                            color: def.accent,
-                            borderRadius: BorderRadius.circular(6)),
-                        child: Text(def.role,
-                            style: const TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 3),
+                  Text(def.name.toUpperCase(),
+                      style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFFFFD45E),
+                          letterSpacing: 1.5)),
+                  const SizedBox(height: 4),
                   Text(def.tagline,
                       style: const TextStyle(
-                          color: Colors.white54, fontSize: 11)),
-                  const SizedBox(height: 6),
-                  Text(
-                      'HP ${def.maxHp.toInt()}  MP ${def.maxMp.toInt()}  '
-                      'DMG ${def.damage}  SPD ${def.speed.toInt()}',
+                          color: Colors.white70,
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic)),
+                  const SizedBox(height: 10),
+                  _statRow('HP', def.maxHp.toInt().toString(),
+                      const Color(0xFFFF5C6C)),
+                  _statRow('MP', def.maxMp.toInt().toString(),
+                      const Color(0xFF3F8BFF)),
+                  _statRow('DMG', def.damage.toString(),
+                      const Color(0xFFFFB347)),
+                  _statRow('SPD', def.speed.toInt().toString(),
+                      const Color(0xFF8CFF98)),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: def.accent.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(6),
+                      border:
+                          Border.all(color: def.accent.withValues(alpha: 0.6)),
+                    ),
+                    child: Row(children: [
+                      Text('✦ ${def.abilityName}',
+                          style: TextStyle(
+                              color: def.accent,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 11)),
+                    ]),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(def.abilityDesc,
                       style: const TextStyle(
-                          color: Colors.white38, fontSize: 10)),
-                  const SizedBox(height: 2),
-                  Text('✦ ${def.abilityName}: ${def.abilityDesc}',
-                      style: TextStyle(
-                          color: def.body, fontSize: 10, height: 1.3)),
+                          color: Colors.white70,
+                          fontSize: 10,
+                          height: 1.4)),
                 ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _statRow(String name, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(children: [
+        SizedBox(
+            width: 28,
+            child: Text(name,
+                style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 10))),
+        Text(value,
+            style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w900,
+                fontSize: 11)),
+      ]),
     );
   }
 }
@@ -4916,6 +4958,160 @@ class HeroPreviewPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant HeroPreviewPainter old) => false;
+}
+
+/// Big Hades-style medallion: ornate gold rings, four diamond ornaments at
+/// the cardinals, dramatic vignette behind the hero, and a red name banner
+/// across the bottom. Used for character-select / keepsake screens.
+class HeroMedallionPainter extends CustomPainter {
+  HeroMedallionPainter({required this.def, this.label});
+  final HeroDef def;
+  final String? label;
+
+  static const _gold = Color(0xFFFFD45E);
+  static const _goldDark = Color(0xFFB58435);
+  static const _ink = Color(0xFF0E0C16);
+  static const _crimson = Color(0xFF7A1F2B);
+  static const _crimsonDark = Color(0xFF3D1218);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height * 0.45;
+    final r = min(size.width, size.height * 0.7) * 0.36;
+
+    // Vignette backdrop behind the medallion.
+    canvas.drawCircle(
+        Offset(cx, cy),
+        r * 1.9,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [
+              _ink,
+              _ink.withValues(alpha: 0.0),
+            ],
+            stops: const [0.45, 1.0],
+          ).createShader(
+              Rect.fromCircle(center: Offset(cx, cy), radius: r * 1.9)));
+
+    // Outer gold ring.
+    canvas.drawCircle(
+        Offset(cx, cy),
+        r + 14,
+        Paint()
+          ..shader = RadialGradient(
+            center: const Alignment(-0.4, -0.6),
+            colors: [_gold, _goldDark],
+          ).createShader(
+              Rect.fromCircle(center: Offset(cx, cy), radius: r + 14)));
+    // Inner dark ring + thin gold liner produce a triple-band Hades feel.
+    canvas.drawCircle(Offset(cx, cy), r + 7, Paint()..color = _ink);
+    canvas.drawCircle(
+        Offset(cx, cy),
+        r + 3,
+        Paint()
+          ..color = _gold
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6);
+
+    // Interior: subtle radial wash in the hero's body color so each class
+    // reads with its own mood inside the same frame.
+    canvas.drawCircle(
+        Offset(cx, cy),
+        r,
+        Paint()
+          ..shader = RadialGradient(
+            center: const Alignment(-0.3, -0.4),
+            colors: [
+              _lit(def.body, 0.25).withValues(alpha: 0.55),
+              const Color(0xFF14131F),
+            ],
+          ).createShader(
+              Rect.fromCircle(center: Offset(cx, cy), radius: r)));
+
+    // Four golden diamond ornaments at the cardinals.
+    for (final a in const [0.0, pi / 2, pi, -pi / 2]) {
+      final ox = cx + cos(a) * (r + 9);
+      final oy = cy + sin(a) * (r + 9);
+      final path = Path()
+        ..moveTo(ox, oy - 7)
+        ..lineTo(ox + 5, oy)
+        ..lineTo(ox, oy + 7)
+        ..lineTo(ox - 5, oy)
+        ..close();
+      canvas.drawPath(path, Paint()..color = _gold);
+      canvas.drawPath(
+          path,
+          Paint()
+            ..color = _ink
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.2);
+    }
+
+    // Hero portrait inside the medallion. Use stage 2 for the "buffed"
+    // silhouette so the class accessories (helm/bow/hat) read clearly.
+    canvas.save();
+    canvas.clipPath(Path()..addOval(Rect.fromCircle(
+        center: Offset(cx, cy), radius: r - 2)));
+    _drawHero(canvas, Offset(cx, cy + r * 0.2), r * 0.65, def, 2);
+    canvas.restore();
+
+    if (label != null) _drawBanner(canvas, size, cy + r + 18, label!);
+  }
+
+  void _drawBanner(Canvas canvas, Size size, double y, String text) {
+    final tp = TextPainter(
+      text: TextSpan(
+          text: text,
+          style: const TextStyle(
+              color: _gold,
+              fontWeight: FontWeight.w900,
+              fontSize: 14,
+              letterSpacing: 2.2,
+              fontFamily: 'RobotoMono')),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final w = (tp.width + 38).clamp(80.0, size.width - 16);
+    final h = tp.height + 14;
+    final left = (size.width - w) / 2;
+    final rect = Rect.fromLTWH(left, y, w, h);
+
+    // Ribbon body: deep crimson with a darker fold underneath.
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            rect.translate(0, 2), const Radius.circular(3)),
+        Paint()..color = _crimsonDark);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+        Paint()..color = _crimson);
+
+    // Gold thin border + a small notch on each end.
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+        Paint()
+          ..color = _gold
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.4);
+    final notch = Path()
+      ..moveTo(rect.left - 8, rect.top + h / 2)
+      ..lineTo(rect.left, rect.top)
+      ..lineTo(rect.left, rect.bottom)
+      ..close();
+    final notch2 = Path()
+      ..moveTo(rect.right + 8, rect.top + h / 2)
+      ..lineTo(rect.right, rect.top)
+      ..lineTo(rect.right, rect.bottom)
+      ..close();
+    canvas.drawPath(notch, Paint()..color = _crimsonDark);
+    canvas.drawPath(notch2, Paint()..color = _crimsonDark);
+
+    tp.paint(canvas,
+        Offset(rect.center.dx - tp.width / 2, rect.center.dy - tp.height / 2));
+  }
+
+  @override
+  bool shouldRepaint(covariant HeroMedallionPainter old) =>
+      old.def != def || old.label != label;
 }
 
 class WorldPainter extends CustomPainter {
