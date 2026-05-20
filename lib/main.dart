@@ -217,6 +217,24 @@ class Loadout {
   static int heat = 0; // Pact of Punishment-style difficulty
   static double get enemyMul => 1 + heat * 0.12;
   static double get rewardMul => 1 + heat * 0.25;
+  // If set, the next run uses this RNG seed and records its score under
+  // `dailyKey()` so each day's seed has a personal best.
+  static int? dailySeed;
+  static String? dailyKey; // YYYYMMDD format
+
+  static String todayKey() {
+    final d = DateTime.now();
+    return '${d.year.toString().padLeft(4, '0')}'
+        '${d.month.toString().padLeft(2, '0')}'
+        '${d.day.toString().padLeft(2, '0')}';
+  }
+
+  // Seed derived from the YYYYMMDD key so everyone on the same day plays
+  // the same generated run (without depending on a server clock).
+  static int todaySeed() {
+    final key = todayKey();
+    return int.tryParse(key) ?? 1;
+  }
 }
 
 /// ---------------------------------------------------------------------------
@@ -680,12 +698,34 @@ class _TitleScreenState extends State<TitleScreen> {
               label: 'PLAY',
               color: const Color(0xFFFFD45E),
               onTap: () {
+                Loadout.dailySeed = null;
+                Loadout.dailyKey = null;
                 platform_fs.enterFullscreen();
                 Navigator.of(context).push(MaterialPageRoute<void>(
                     builder: (_) => const CharacterSelectScreen()));
               },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
+            _BigButton(
+              label: '🌞 DAILY CHALLENGE',
+              color: const Color(0xFFFF8A4C),
+              onTap: () {
+                Loadout.dailyKey = Loadout.todayKey();
+                Loadout.dailySeed = Loadout.todaySeed();
+                platform_fs.enterFullscreen();
+                Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const CharacterSelectScreen()));
+              },
+            ),
+            if (GameStats.dailyBest[Loadout.todayKey()] != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                    "today's best: ${GameStats.dailyBest[Loadout.todayKey()]}",
+                    style: const TextStyle(
+                        color: Color(0xFFFF8A4C), fontSize: 11)),
+              ),
+            const SizedBox(height: 10),
             _BigButton(
               label: 'HOME (UPGRADES)',
               color: const Color(0xFF8CC8FF),
@@ -695,15 +735,41 @@ class _TitleScreenState extends State<TitleScreen> {
                 if (mounted) setState(() {});
               },
             ),
-            const SizedBox(height: 12),
-            _BigButton(
-              label: '⚙ SETTINGS',
-              color: const Color(0xFF8CC8FF),
-              onTap: () async {
-                await Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => const SettingsScreen()));
-                if (mounted) setState(() {});
-              },
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _SmallChip(
+                    icon: Icons.menu_book_outlined,
+                    label: 'BESTIARY',
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                              builder: (_) => const BestiaryScreen()));
+                      if (mounted) setState(() {});
+                    }),
+                const SizedBox(width: 10),
+                _SmallChip(
+                    icon: Icons.emoji_events_outlined,
+                    label:
+                        'ACHIEVEMENTS ${GameStats.achievements.length}/${kAchievements.length}',
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                              builder: (_) => const AchievementsScreen()));
+                      if (mounted) setState(() {});
+                    }),
+                const SizedBox(width: 10),
+                _SmallChip(
+                    icon: Icons.settings_outlined,
+                    label: 'SETTINGS',
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                              builder: (_) => const SettingsScreen()));
+                      if (mounted) setState(() {});
+                    }),
+              ],
             ),
             const SizedBox(height: 18),
             Row(
@@ -901,6 +967,144 @@ class _HomeScreenState extends State<HomeScreen> {
 /// ---------------------------------------------------------------------------
 /// Character select
 /// ---------------------------------------------------------------------------
+class BestiaryScreen extends StatelessWidget {
+  const BestiaryScreen({super.key});
+
+  static const _entries = [
+    (0, 'GRUNT', Color(0xFFB6FFC0),
+        'baseline cube. low HP, modest damage, wanders straight at you.'),
+    (1, 'SWIFT', Color(0xFFFF8A4C),
+        'fast and fragile. closes range in a hurry — dash or kite.'),
+    (2, 'BRUTE', Color(0xFF9B5CFF),
+        'slow, beefy. hits hard up close, but easy to outpace.'),
+    (3, 'BOSS', Color(0xFFFF3B5C),
+        'floor warden. winds up a telegraphed nova every few seconds.'),
+    (4, 'SHOOTER', Color(0xFF4CD2C0),
+        'kites and lobs bolts. may shoot frost or fire from deeper floors.'),
+    (5, 'SHIELDED', Color(0xFF9CA8B5),
+        'steel brute. takes half damage above 50% HP — break the armor.'),
+    (6, 'FROST', Color(0xFFA9E8FF),
+        'chills you on contact, halving your move speed for a moment.'),
+    (7, 'VAMPIRE', Color(0xFF8E1A2B),
+        'heals from any damage it lands on you. do not let it touch.'),
+    (8, 'KAMIKAZE', Color(0xFFFF6432),
+        'fast, fragile, explodes in a wide AoE the instant it reaches you.'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('BESTIARY')),
+      body: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: _entries.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        itemBuilder: (_, i) {
+          final (kind, name, color, desc) = _entries[i];
+          final kills = GameStats.killsByKind[kind] ?? 0;
+          final seen = kills > 0;
+          return Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1F1D2E),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: seen ? color : Colors.white12),
+            ),
+            child: Row(children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: seen ? color : Colors.white12,
+                  shape: BoxShape.circle,
+                  boxShadow: seen
+                      ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 12)]
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(seen ? name : '???',
+                        style: TextStyle(
+                            color: seen ? Colors.white : Colors.white38,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 15)),
+                    Text(seen ? desc : 'undiscovered — defeat one to reveal',
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 12)),
+                  ],
+                ),
+              ),
+              Text(seen ? '$kills' : '—',
+                  style: TextStyle(
+                      color: seen ? color : Colors.white38,
+                      fontWeight: FontWeight.w900)),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class AchievementsScreen extends StatelessWidget {
+  const AchievementsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final unlocked = GameStats.achievements;
+    return Scaffold(
+      appBar: AppBar(
+          title: Text(
+              'ACHIEVEMENTS · ${unlocked.length}/${kAchievements.length}')),
+      body: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: kAchievements.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        itemBuilder: (_, i) {
+          final a = kAchievements[i];
+          final got = unlocked.contains(a.id);
+          return Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1F1D2E),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                  color: got ? const Color(0xFFFFD45E) : Colors.white12),
+            ),
+            child: Row(children: [
+              Icon(got ? Icons.star : Icons.star_border,
+                  color: got
+                      ? const Color(0xFFFFD45E)
+                      : Colors.white24,
+                  size: 28),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(a.title,
+                        style: TextStyle(
+                            color: got ? Colors.white : Colors.white38,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 15)),
+                    Text(a.desc,
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
   @override
@@ -1362,6 +1566,21 @@ class EBolt {
   final int kind;
 }
 
+class Heart {
+  Heart(this.pos);
+  Offset pos;
+  double life = 12.0; // hearts disappear if uncollected after ~12s
+  double bob = 0;
+}
+
+class Toast {
+  Toast(this.title, this.subtitle, [this.color = const Color(0xFFFFD45E)]);
+  final String title;
+  final String subtitle;
+  final Color color;
+  double t = 3.6; // total seconds visible (fades during final 1s)
+}
+
 class Orb {
   Orb(this.pos, this.xp);
   Offset pos;
@@ -1465,12 +1684,40 @@ class Settings {
   }
 }
 
+class Achievement {
+  const Achievement(this.id, this.title, this.desc);
+  final String id;
+  final String title;
+  final String desc;
+}
+
+const List<Achievement> kAchievements = [
+  Achievement('first_blood', 'FIRST BLOOD', 'land your first kill'),
+  Achievement('kills_100', 'CENTURION', 'rack up 100 lifetime kills'),
+  Achievement('kills_1000', 'EXTERMINATOR', 'rack up 1 000 lifetime kills'),
+  Achievement('combo_20', 'STREAKER', 'reach a combo of 20'),
+  Achievement('combo_50', 'INFERNO', 'reach a combo of 50'),
+  Achievement('boss_1', 'GIANT SLAYER', 'defeat your first boss'),
+  Achievement('boss_5', 'TYRANT', 'defeat 5 bosses lifetime'),
+  Achievement('floor_3', 'DEEP DIVE', 'reach floor 3'),
+  Achievement('floor_5', 'BEDROCK', 'reach floor 5'),
+  Achievement('vampire_50', 'STAKE MASTER', 'kill 50 vampires'),
+  Achievement('kamikaze_50', 'BOMB SQUAD', 'kill 50 kamikazes'),
+  Achievement('shielded_50', 'CAN OPENER', 'kill 50 shielded brutes'),
+];
+
 class GameStats {
   static int bestWave = 0;
   static int bestFloor = 0;
   static int totalKills = 0;
   static int totalObols = 0;
   static int totalRuns = 0;
+  static int bestCombo = 0;
+  static int totalBossKills = 0;
+  static final Map<int, int> killsByKind = {};
+  static final Set<String> achievements = {};
+  // dailyBest keyed by YYYYMMDD → best score for that day's seeded run.
+  static final Map<String, int> dailyBest = {};
 
   static Future<void> load() async {
     try {
@@ -1480,6 +1727,20 @@ class GameStats {
       totalKills = p.getInt('bb_totalKills') ?? 0;
       totalObols = p.getInt('bb_totalObols') ?? 0;
       totalRuns = p.getInt('bb_totalRuns') ?? 0;
+      bestCombo = p.getInt('bb_bestCombo') ?? 0;
+      totalBossKills = p.getInt('bb_totalBossKills') ?? 0;
+      killsByKind.clear();
+      for (int k = 0; k < 9; k++) {
+        final n = p.getInt('bb_killsK$k') ?? 0;
+        if (n > 0) killsByKind[k] = n;
+      }
+      achievements
+        ..clear()
+        ..addAll(p.getStringList('bb_ach') ?? const <String>[]);
+      dailyBest.clear();
+      for (final key in (p.getStringList('bb_dailyKeys') ?? const <String>[])) {
+        dailyBest[key] = p.getInt('bb_daily_$key') ?? 0;
+      }
     } catch (_) {}
   }
 
@@ -1491,6 +1752,16 @@ class GameStats {
       await p.setInt('bb_totalKills', totalKills);
       await p.setInt('bb_totalObols', totalObols);
       await p.setInt('bb_totalRuns', totalRuns);
+      await p.setInt('bb_bestCombo', bestCombo);
+      await p.setInt('bb_totalBossKills', totalBossKills);
+      for (final e in killsByKind.entries) {
+        await p.setInt('bb_killsK${e.key}', e.value);
+      }
+      await p.setStringList('bb_ach', achievements.toList());
+      await p.setStringList('bb_dailyKeys', dailyBest.keys.toList());
+      for (final e in dailyBest.entries) {
+        await p.setInt('bb_daily_${e.key}', e.value);
+      }
     } catch (_) {}
   }
 
@@ -1531,7 +1802,7 @@ class _GameScreenState extends State<GameScreen>
     with SingleTickerProviderStateMixin {
   late final Ticker _ticker;
   Duration _last = Duration.zero;
-  final Random _rng = Random();
+  Random _rng = Random();
 
   Size _size = Size.zero;
   late GameMap _map;
@@ -1543,6 +1814,8 @@ class _GameScreenState extends State<GameScreen>
   final List<Bolt> _bolts = [];
   final List<EBolt> _ebolts = [];
   final List<Orb> _orbs = [];
+  final List<Heart> _hearts = [];
+  final List<Toast> _toasts = [];
   final List<Burst> _bursts = [];
   final List<FloatText> _texts = [];
   final List<Door> _doors = [];
@@ -1611,6 +1884,8 @@ class _GameScreenState extends State<GameScreen>
     _bolts.clear();
     _ebolts.clear();
     _orbs.clear();
+    _hearts.clear();
+    _toasts.clear();
     _bursts.clear();
     _texts.clear();
     _doors.clear();
@@ -1682,6 +1957,11 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _initRun() {
+    if (Loadout.dailySeed != null) {
+      _rng = Random(Loadout.dailySeed!);
+    } else {
+      _rng = Random();
+    }
     _p = Player(widget.def);
     Loadout.keepsake?.apply(_p);
     _wave = 1;
@@ -1783,6 +2063,32 @@ class _GameScreenState extends State<GameScreen>
       }
       return false;
     });
+
+    for (final h in _hearts) {
+      h.life -= dt;
+      h.bob += dt;
+      final dir = _p.pos - h.pos;
+      final d = dir.distance;
+      if (d < 160 && d > 0.01) h.pos += dir / d * 240 * dt;
+    }
+    _hearts.removeWhere((h) {
+      if (h.life <= 0) return true;
+      if ((h.pos - _p.pos).distance < _p.radius + 11) {
+        _p.hp = (_p.hp + 6).clamp(0, _p.maxHp).toDouble();
+        _texts.add(FloatText(
+            _p.pos.translate(0, -22), '+6', const Color(0xFFFF6B79)));
+        Sfx.play('pickup', vol: 0.7, pitch: 1.2);
+        return true;
+      }
+      return false;
+    });
+
+    if (_toasts.isNotEmpty) {
+      for (final t in _toasts) {
+        t.t -= dt;
+      }
+      _toasts.removeWhere((t) => t.t <= 0);
+    }
 
     if (_phase == Phase.roomCleared) {
       for (final d in _doors) {
@@ -2077,6 +2383,18 @@ class _GameScreenState extends State<GameScreen>
         _p.kills++;
         _combo++;
         _comboT = 3.5;
+        // Stats + achievement bookkeeping.
+        GameStats.killsByKind.update(e.kind, (n) => n + 1,
+            ifAbsent: () => 1);
+        if (e.kind == 3) GameStats.totalBossKills++;
+        if (_combo > GameStats.bestCombo) GameStats.bestCombo = _combo;
+        // Boss kills can drop a healing heart for the player.
+        if (e.kind == 3) {
+          _hearts.add(Heart(e.pos));
+        } else if (e.elite && _rng.nextDouble() < 0.18) {
+          _hearts.add(Heart(e.pos));
+        }
+        _checkAchievements();
         return true;
       }
       return false;
@@ -2518,6 +2836,33 @@ class _GameScreenState extends State<GameScreen>
     }
   }
 
+  // Run all achievement predicates after a relevant event and emit a toast
+  // for each newly-unlocked achievement.
+  void _checkAchievements() {
+    bool got(String id) => GameStats.achievements.contains(id);
+    void unlock(String id) {
+      if (got(id)) return;
+      final ach = kAchievements.firstWhere((a) => a.id == id);
+      GameStats.achievements.add(id);
+      GameStats.save();
+      _toasts.add(Toast('★ ${ach.title}', ach.desc));
+      Sfx.play('pickup', vol: 0.9, pitch: 1.35);
+    }
+
+    if (GameStats.totalKills + _p.kills >= 1) unlock('first_blood');
+    if (GameStats.totalKills + _p.kills >= 100) unlock('kills_100');
+    if (GameStats.totalKills + _p.kills >= 1000) unlock('kills_1000');
+    if (_combo >= 20) unlock('combo_20');
+    if (_combo >= 50) unlock('combo_50');
+    if (GameStats.totalBossKills >= 1) unlock('boss_1');
+    if (GameStats.totalBossKills >= 5) unlock('boss_5');
+    if (_floorIdx + 1 >= 3) unlock('floor_3');
+    if (_floorIdx + 1 >= 5) unlock('floor_5');
+    if ((GameStats.killsByKind[7] ?? 0) >= 50) unlock('vampire_50');
+    if ((GameStats.killsByKind[8] ?? 0) >= 50) unlock('kamikaze_50');
+    if ((GameStats.killsByKind[5] ?? 0) >= 50) unlock('shielded_50');
+  }
+
   void _gainXp(int amount) {
     _p.xp += amount;
     while (_p.xp >= _p.xpToNext) {
@@ -2742,15 +3087,27 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _gameOver() {
+    _recordDailyScore();
     GameStats.recordRunEnd(_wave, _floorIdx + 1, _p.kills, _p.obols);
     _awardShards();
     _phase = Phase.gameOver;
   }
 
   void _victory() {
+    _recordDailyScore();
     GameStats.recordRunEnd(_wave, _floorIdx + 1, _p.kills, _p.obols);
     _awardShards();
     _phase = Phase.victory;
+  }
+
+  // Score formula for daily challenges: rewards both depth and clearing.
+  void _recordDailyScore() {
+    final key = Loadout.dailyKey;
+    if (key == null) return;
+    final score = _p.kills + _wave * 25 + _floorIdx * 100;
+    final prev = GameStats.dailyBest[key] ?? 0;
+    if (score > prev) GameStats.dailyBest[key] = score;
+    GameStats.save();
   }
 
   int _lastGain = 0;
@@ -2875,6 +3232,7 @@ class _GameScreenState extends State<GameScreen>
                       bolts: _bolts,
                       ebolts: _ebolts,
                       orbs: _orbs,
+                      hearts: _hearts,
                       bursts: _bursts,
                       texts: _texts,
                       doors: _doors,
@@ -2904,6 +3262,7 @@ class _GameScreenState extends State<GameScreen>
                 if (_ready && play) _pauseButton(),
                 if (_phase == Phase.paused) _pauseOverlay(),
                 if (_phase == Phase.levelUp) _levelUpOverlay(),
+                if (_toasts.isNotEmpty) _toastStack(),
                 if (_phase == Phase.shop) _shopOverlay(),
                 if (_phase == Phase.shrine) _shrineOverlay(),
                 if (_ready && _showTutorial) _tutorialOverlay(),
@@ -3237,6 +3596,51 @@ class _GameScreenState extends State<GameScreen>
             padding: const EdgeInsets.all(20),
             child: child,
           ),
+        ),
+      ),
+    );
+  }
+
+  // Right-side stack of achievement / event toasts that fade out near 0s.
+  Widget _toastStack() {
+    return Positioned(
+      right: 16,
+      top: 64,
+      child: IgnorePointer(
+        ignoring: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            for (final t in _toasts)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Opacity(
+                  opacity: t.t < 1.0 ? t.t.clamp(0.0, 1.0).toDouble() : 1.0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xCC1F1D2E),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: t.color, width: 1.5),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(t.title,
+                            style: TextStyle(
+                                color: t.color,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 13)),
+                        Text(t.subtitle,
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -3606,6 +4010,40 @@ class _UpgradeCard extends StatelessWidget {
   }
 }
 
+class _SmallChip extends StatelessWidget {
+  const _SmallChip(
+      {required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1F1D2E),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF8CC8FF), width: 1),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 16, color: const Color(0xFF8CC8FF)),
+          const SizedBox(width: 6),
+          Text(label,
+              style: const TextStyle(
+                  color: Color(0xFF8CC8FF),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 11,
+                  letterSpacing: 0.8)),
+        ]),
+      ),
+    );
+  }
+}
+
 class _BigButton extends StatelessWidget {
   const _BigButton(
       {required this.label, required this.color, required this.onTap});
@@ -3886,6 +4324,7 @@ class WorldPainter extends CustomPainter {
     required this.bolts,
     required this.ebolts,
     required this.orbs,
+    required this.hearts,
     required this.bursts,
     required this.texts,
     required this.doors,
@@ -3911,6 +4350,7 @@ class WorldPainter extends CustomPainter {
   final List<Bolt> bolts;
   final List<EBolt> ebolts;
   final List<Orb> orbs;
+  final List<Heart> hearts;
   final List<Burst> bursts;
   final List<FloatText> texts;
   final List<Door> doors;
@@ -4267,6 +4707,33 @@ class WorldPainter extends CustomPainter {
       canvas.drawCircle(
           o.pos, 4 + pul * 1.6, Paint()..color = const Color(0xFFB6FFC0));
       }));
+    }
+    for (final h in hearts) {
+      final pos = h.pos.translate(0, -2 + sin(h.bob * 4) * 2);
+      // Fade out during the last second before despawning.
+      final fade = h.life < 1.0 ? h.life.clamp(0.0, 1.0).toDouble() : 1.0;
+      add(dep(pos), () => _projAt(canvas, pos, 0, () {
+            canvas.drawCircle(
+                pos,
+                14,
+                Paint()
+                  ..color =
+                      const Color(0xFFFF6B79).withValues(alpha: 0.20 * fade));
+            // Two overlapping circles + a triangle approximate a heart icon.
+            canvas.drawCircle(pos.translate(-3.4, -1),
+                4.4, Paint()..color = const Color(0xFFFF6B79).withValues(alpha: fade));
+            canvas.drawCircle(pos.translate(3.4, -1),
+                4.4, Paint()..color = const Color(0xFFFF6B79).withValues(alpha: fade));
+            final path = Path()
+              ..moveTo(pos.dx - 6.5, pos.dy + 1)
+              ..lineTo(pos.dx + 6.5, pos.dy + 1)
+              ..lineTo(pos.dx, pos.dy + 8)
+              ..close();
+            canvas.drawPath(
+                path,
+                Paint()
+                  ..color = const Color(0xFFFF6B79).withValues(alpha: fade));
+          }));
     }
 
     for (final e in enemies) {
