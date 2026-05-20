@@ -2091,6 +2091,10 @@ class _GameScreenState extends State<GameScreen>
   late GameMap _map;
   bool _ready = false;
   bool _showTutorial = false;
+  // BFS distance field from the player's tile so enemies can route around
+  // walls and pools instead of walking straight into them.
+  List<int>? _flow;
+  int _flowFromCell = -1;
 
   late Player _p;
   final List<Enemy> _enemies = [];
@@ -2164,6 +2168,8 @@ class _GameScreenState extends State<GameScreen>
 
   void _genRoom() {
     WorldPainter.resetCaches(); // drop stale floor/wall caches from previous map
+    _flow = null;
+    _flowFromCell = -1;
     _map = GameMap.generate(_rng, _size.width, _size.height, _wave);
     final entryPos = _edgeSpawn(_entrySide);
     _p.pos = entryPos;
@@ -2295,6 +2301,97 @@ class _GameScreenState extends State<GameScreen>
     if (_free(Offset(pos.dx + delta.dx, pos.dy), rad)) nx = pos.dx + delta.dx;
     if (_free(Offset(nx, pos.dy + delta.dy), rad)) ny = pos.dy + delta.dy;
     return Offset(nx, ny);
+  }
+
+  // Rebuilds the player-anchored BFS distance field. Cells that aren't pure
+  // floor (walls + pools) are blocked so AI can't path through them. Cheap
+  // enough to run on every player-cell change — re-uses the buffer otherwise.
+  void _ensureFlow() {
+    final m = _map;
+    final cell = m.cell;
+    final pc = (_p.pos.dx / cell).floor();
+    final pr = (_p.pos.dy / cell).floor();
+    if (pc < 0 || pr < 0 || pc >= m.cols || pr >= m.rows) return;
+    final key = pr * m.cols + pc;
+    if (_flowFromCell == key && _flow != null) return;
+    _flowFromCell = key;
+    final flow = List<int>.filled(m.cols * m.rows, 0x7FFFFFFF);
+    if (m.tt(pc, pr) != 1) {
+      _flow = flow;
+      return;
+    }
+    flow[key] = 0;
+    final q = <int>[key];
+    var head = 0;
+    while (head < q.length) {
+      final i = q[head++];
+      final c = i % m.cols, r = i ~/ m.cols;
+      final d = flow[i] + 1;
+      for (final dir in const [(1, 0), (-1, 0), (0, 1), (0, -1)]) {
+        final nc = c + dir.$1, nr = r + dir.$2;
+        if (nc < 0 || nr < 0 || nc >= m.cols || nr >= m.rows) continue;
+        if (m.tt(nc, nr) != 1) continue;
+        final ni = nr * m.cols + nc;
+        if (flow[ni] > d) {
+          flow[ni] = d;
+          q.add(ni);
+        }
+      }
+    }
+    _flow = flow;
+  }
+
+  // True iff the segment from `a` to `b` is fully over floor tiles (no
+  // walls and no pools in between). Sampled at sub-cell resolution.
+  bool _pathClear(Offset a, Offset b) {
+    final dx = b.dx - a.dx, dy = b.dy - a.dy;
+    final dist = sqrt(dx * dx + dy * dy);
+    if (dist < 1) return true;
+    final steps = (dist / (_map.cell * 0.4)).ceil().clamp(1, 80);
+    final inv = 1.0 / steps;
+    for (var i = 1; i < steps; i++) {
+      final t = i * inv;
+      final x = a.dx + dx * t;
+      final y = a.dy + dy * t;
+      final c = (x / _map.cell).floor();
+      final r = (y / _map.cell).floor();
+      if (_map.tt(c, r) != 1) return false;
+    }
+    return true;
+  }
+
+  // Returns a unit vector toward the lowest-cost neighbor cell of `from`
+  // in the flow field, i.e. one step down the gradient toward the player.
+  Offset _flowStep(Offset from) {
+    _ensureFlow();
+    final flow = _flow;
+    if (flow == null) return Offset.zero;
+    final cell = _map.cell;
+    final c = (from.dx / cell).floor();
+    final r = (from.dy / cell).floor();
+    if (c < 0 || r < 0 || c >= _map.cols || r >= _map.rows) {
+      return Offset.zero;
+    }
+    final myDist = flow[r * _map.cols + c];
+    if (myDist >= 0x7FFFFFFF) return Offset.zero;
+    var bestC = c, bestR = r;
+    var bestDist = myDist;
+    for (final dir in const [(1, 0), (-1, 0), (0, 1), (0, -1)]) {
+      final nc = c + dir.$1, nr = r + dir.$2;
+      if (nc < 0 || nr < 0 || nc >= _map.cols || nr >= _map.rows) continue;
+      final d = flow[nr * _map.cols + nc];
+      if (d < bestDist) {
+        bestDist = d;
+        bestC = nc;
+        bestR = nr;
+      }
+    }
+    if (bestC == c && bestR == r) return Offset.zero;
+    final target = Offset((bestC + 0.5) * cell, (bestR + 0.5) * cell);
+    final v = target - from;
+    final mag = v.distance;
+    if (mag < 0.01) return Offset.zero;
+    return v / mag;
   }
 
   void _update(double dt) {
@@ -2571,17 +2668,29 @@ class _GameScreenState extends State<GameScreen>
       }
       if (e.kind == 4) {
         if (d < 220 && d > 0.01) {
+          // Retreating stays direct — kiter is right next to the player.
           e.pos = _slide(e.pos, -dir / d * e.speed * dt, rad);
         } else if (d > 300 && d > 0.01) {
-          e.pos = _slide(e.pos, dir / d * e.speed * dt, rad);
+          final chase = _pathClear(e.pos, _p.pos)
+              ? dir / d
+              : _flowStep(e.pos);
+          if (chase != Offset.zero) {
+            e.pos = _slide(e.pos, chase * e.speed * dt, rad);
+          }
         }
         e.shootTimer -= dt;
-        if (e.shootTimer <= 0 && d < 460 && d > 0.01) {
+        if (e.shootTimer <= 0 && d < 460 && d > 0.01 &&
+            _pathClear(e.pos, _p.pos)) {
           e.shootTimer = 1.7;
           _ebolts.add(EBolt(e.pos, dir / d * 220, e.damage, kind: e.boltKind));
         }
       } else if (d > 0.01) {
-        e.pos = _slide(e.pos, dir / d * e.speed * dt, rad);
+        // Walk straight when there's line of sight; otherwise follow the
+        // flow field around walls + pools.
+        final step = _pathClear(e.pos, _p.pos) ? dir / d : _flowStep(e.pos);
+        if (step != Offset.zero) {
+          e.pos = _slide(e.pos, step * e.speed * dt, rad);
+        }
       }
 
       if (e.dotTimer > 0) {
@@ -5156,53 +5265,49 @@ class WorldPainter extends CustomPainter {
       Canvas canvas, void Function(double, void Function()) add) {
     final cellSize = map!.cell;
     double dep(Offset p) => (p.dx + p.dy) / cellSize;
-    // traps
+    // traps — drawn as a diamond filling the floor tile so the marker
+    // visually matches the iso grid instead of floating as a flat circle.
+    final cell = map!.cell;
     for (final tr in traps) {
       add(dep(tr.pos), () => _projAt(canvas, tr.pos, 0, () {
-      final col = tr.state == 1
-          ? const Color(0xFFFF5C5C)
-          : (tr.state == 2
-              ? const Color(0x55FFFFFF)
-              : const Color(0xFFFFB347));
-      final pulse =
-          tr.state == 1 ? 0.5 + 0.5 * sin(time * 24) : 0.4;
-      canvas.drawCircle(tr.pos, tr.r,
-          Paint()..color = col.withValues(alpha: 0.18 + 0.2 * pulse));
-      canvas.drawCircle(
-          tr.pos,
-          tr.r,
-          Paint()
-            ..color = col
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2);
-      // X mark
-      final mp = Paint()
-        ..color = col
-        ..strokeWidth = 3;
-      canvas.drawLine(tr.pos.translate(-tr.r * 0.4, -tr.r * 0.4),
-          tr.pos.translate(tr.r * 0.4, tr.r * 0.4), mp);
-      canvas.drawLine(tr.pos.translate(tr.r * 0.4, -tr.r * 0.4),
-          tr.pos.translate(-tr.r * 0.4, tr.r * 0.4), mp);
-      }));
+            final col = tr.state == 1
+                ? const Color(0xFFFF5C5C)
+                : (tr.state == 2
+                    ? const Color(0x55FFFFFF)
+                    : const Color(0xFFFFB347));
+            final pulse =
+                tr.state == 1 ? 0.5 + 0.5 * sin(time * 24) : 0.4;
+            final tc = (tr.pos.dx / cell).floor();
+            final trow = (tr.pos.dy / cell).floor();
+            final tile = _tilePath(cell, tc, trow);
+            canvas.drawPath(tile,
+                Paint()..color = col.withValues(alpha: 0.20 + 0.22 * pulse));
+            canvas.drawPath(
+                tile,
+                Paint()
+                  ..color = col
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = 2);
+            final mp = Paint()
+              ..color = col
+              ..strokeWidth = 3;
+            canvas.drawLine(tr.pos.translate(-tr.r * 0.35, -tr.r * 0.35),
+                tr.pos.translate(tr.r * 0.35, tr.r * 0.35), mp);
+            canvas.drawLine(tr.pos.translate(tr.r * 0.35, -tr.r * 0.35),
+                tr.pos.translate(-tr.r * 0.35, tr.r * 0.35), mp);
+          }));
     }
 
-    // ballistas + their warning line
+    // Ballista heads only — the warning laser line was distracting in tight
+    // rooms and made every room look like a kill grid, so it's gone now.
     for (final ba in ballistas) {
       add(dep(ba.pos), () => _projAt(canvas, ba.pos, 0, () {
-      final dir = ba.vel.distance > 0
-          ? ba.vel / ba.vel.distance
-          : const Offset(1, 0);
-      canvas.drawRect(
-          Rect.fromCenter(center: ba.pos, width: 22, height: 22),
-          Paint()..color = _shd(floor.prop, 0.1));
-      canvas.drawCircle(ba.pos, 7, Paint()..color = const Color(0xFFBB4444));
-      canvas.drawLine(
-          ba.pos,
-          ba.pos + dir * 1400,
-          Paint()
-            ..color = const Color(0x33FF4D5E)
-            ..strokeWidth = 2);
-      }));
+            canvas.drawRect(
+                Rect.fromCenter(center: ba.pos, width: 22, height: 22),
+                Paint()..color = _shd(floor.prop, 0.1));
+            canvas.drawCircle(
+                ba.pos, 7, Paint()..color = const Color(0xFFBB4444));
+          }));
     }
 
     // Doors are intentionally NOT added to the depth-sorted queue — they
