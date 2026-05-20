@@ -14,6 +14,7 @@ Future<void> main() async {
   await SystemChrome.setPreferredOrientations(
       [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await MetaStore.load();
+  await GameStats.load();
   await Sfx.init();
   runApp(const BuffBattleApp());
 }
@@ -697,13 +698,20 @@ class _TitleScreenState extends State<TitleScreen> {
             const SizedBox(height: 12),
             Text('🔷 ${MetaStore.shards} shards',
                 style: const TextStyle(color: Color(0xFF8CC8FF))),
-            if (GameStats.bestWave > 0)
+            if (GameStats.totalRuns > 0)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                    'best: floor ${((GameStats.bestWave - 1) ~/ kWavesPerFloor) + 1}'
-                    ' · room ${GameStats.bestWave}',
-                    style: const TextStyle(color: Colors.white38)),
+                child: Column(children: [
+                  Text(
+                      'best: floor ${GameStats.bestFloor}'
+                      ' · room ${GameStats.bestWave}',
+                      style: const TextStyle(color: Colors.white38)),
+                  Text(
+                      '${GameStats.totalRuns} runs · '
+                      '${GameStats.totalKills} total kills',
+                      style:
+                          const TextStyle(color: Colors.white24, fontSize: 11)),
+                ]),
               ),
           ],
         ),
@@ -1243,7 +1251,9 @@ class Ballista {
   double timer = 0;
 }
 
-enum DoorKind { reward, boon, shop }
+enum DoorKind { reward, boon, shop, treasure, challenge, shrine }
+
+enum RoomKind { normal, treasure, challenge, shrine }
 
 class DoorDef {
   DoorDef(this.icon, this.title, this.desc, this.kind, this.apply);
@@ -1263,9 +1273,54 @@ class Door {
 
 class GameStats {
   static int bestWave = 0;
+  static int bestFloor = 0;
+  static int totalKills = 0;
+  static int totalObols = 0;
+  static int totalRuns = 0;
+
+  static Future<void> load() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      bestWave = p.getInt('bb_bestWave') ?? 0;
+      bestFloor = p.getInt('bb_bestFloor') ?? 0;
+      totalKills = p.getInt('bb_totalKills') ?? 0;
+      totalObols = p.getInt('bb_totalObols') ?? 0;
+      totalRuns = p.getInt('bb_totalRuns') ?? 0;
+    } catch (_) {}
+  }
+
+  static Future<void> save() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setInt('bb_bestWave', bestWave);
+      await p.setInt('bb_bestFloor', bestFloor);
+      await p.setInt('bb_totalKills', totalKills);
+      await p.setInt('bb_totalObols', totalObols);
+      await p.setInt('bb_totalRuns', totalRuns);
+    } catch (_) {}
+  }
+
+  static void recordRunEnd(int reachedWave, int reachedFloor, int kills,
+      int obols) {
+    totalRuns += 1;
+    totalKills += kills;
+    totalObols += obols;
+    if (reachedWave > bestWave) bestWave = reachedWave;
+    if (reachedFloor > bestFloor) bestFloor = reachedFloor;
+    save();
+  }
 }
 
-enum Phase { playing, roomCleared, paused, levelUp, shop, gameOver, victory }
+enum Phase {
+  playing,
+  roomCleared,
+  paused,
+  levelUp,
+  shop,
+  shrine,
+  gameOver,
+  victory
+}
 
 /// ---------------------------------------------------------------------------
 /// Game
@@ -1303,6 +1358,13 @@ class _GameScreenState extends State<GameScreen>
 
   Phase _phase = Phase.playing;
   int _wave = 1;
+  int _combo = 0;
+  double _comboT = 0;
+  RoomKind _roomKind = RoomKind.normal;
+  double get _comboFireMul =>
+      _combo >= 25 ? 0.7 : (_combo >= 10 ? 0.85 : 1.0);
+  double get _comboDmgMul =>
+      _combo >= 25 ? 1.20 : (_combo >= 10 ? 1.10 : 1.0);
   int _toSpawn = 0;
   bool _bossSpawned = false;
   double _spawnTimer = 0;
@@ -1363,7 +1425,28 @@ class _GameScreenState extends State<GameScreen>
     _ballistas.clear();
     _bossSpawned = false;
     _spawnTimer = 0.6;
-    _toSpawn = _bossWave ? 7 : (6 + _wave * 2).clamp(6, 26).toInt();
+    var spawn = _bossWave ? 7 : (6 + _wave * 2).clamp(6, 26).toInt();
+    if (_roomKind == RoomKind.treasure) spawn = 0;
+    if (_roomKind == RoomKind.challenge) spawn = (spawn * 1.6).round();
+    if (_roomKind == RoomKind.shrine) spawn = 0;
+    _toSpawn = spawn;
+
+    // Treasure rooms: drop a pile of obol orbs by the entry.
+    if (_roomKind == RoomKind.treasure) {
+      final c = _map.roomCenter(0);
+      for (var i = 0; i < 6; i++) {
+        final a = _rng.nextDouble() * 2 * pi;
+        final off = Offset(cos(a), sin(a)) * (40.0 + _rng.nextDouble() * 60);
+        _orbs.add(Orb(c + off, 4 + _floorIdx));
+      }
+      _p.obols += 8 + _floorIdx * 6;
+      _texts.add(FloatText(c.translate(0, -28), 'TREASURE ROOM',
+          const Color(0xFFFFD45E)));
+    }
+    if (_roomKind == RoomKind.challenge) {
+      _texts.add(FloatText(_p.pos.translate(0, -32), 'CHALLENGE!',
+          const Color(0xFFFF9A3C)));
+    }
 
     // traps: visible, sparse, away from the entry
     final entry = _map.roomCenter(0);
@@ -1408,6 +1491,9 @@ class _GameScreenState extends State<GameScreen>
     Loadout.keepsake?.apply(_p);
     _wave = 1;
     _shake = 0;
+    _combo = 0;
+    _comboT = 0;
+    _roomKind = RoomKind.normal;
     _boonThenNext = false;
     _genRoom();
     _phase = Phase.playing;
@@ -1455,6 +1541,10 @@ class _GameScreenState extends State<GameScreen>
     if (_p.invuln > 0) _p.invuln -= dt;
     if (_p.frenzy > 0) _p.frenzy -= dt;
     if (_p.abilityTimer > 0) _p.abilityTimer -= dt;
+    if (_combo > 0) {
+      _comboT -= dt;
+      if (_comboT <= 0) _combo = 0;
+    }
     if (_p.dashTimer > 0) _p.dashTimer -= dt;
     for (final g in _ghosts) {
       g.life -= dt;
@@ -1516,7 +1606,7 @@ class _GameScreenState extends State<GameScreen>
       final t = _nearestEnemy(atkRange);
       if (t != null) {
         _attack(t.pos - _p.pos);
-        _p.fireTimer = _p.effFire * _p.weapon.rofMul;
+        _p.fireTimer = _p.effFire * _p.weapon.rofMul * _comboFireMul;
         if (_p.volleys > 1) {
           _p.volleyLeft = _p.volleys - 1;
           _p.volleyTimer = 0.10;
@@ -1691,12 +1781,16 @@ class _GameScreenState extends State<GameScreen>
           _p.hp = (_p.hp + _p.lifesteal).clamp(0, _p.maxHp).toDouble();
         }
         _p.kills++;
+        _combo++;
+        _comboT = 3.5;
         return true;
       }
       return false;
     });
 
-    if (_toSpawn <= 0 && _enemies.isEmpty) _roomEnd();
+    final treasureWait =
+        _roomKind == RoomKind.treasure && _orbs.isNotEmpty;
+    if (_toSpawn <= 0 && _enemies.isEmpty && !treasureWait) _roomEnd();
   }
 
   void _hurtPlayer(double dmg) {
@@ -1704,6 +1798,8 @@ class _GameScreenState extends State<GameScreen>
     _p.hp -= dmg;
     _p.hurtFlash = 0.25;
     _shake = max(_shake, 7.0);
+    _combo = 0;
+    _comboT = 0;
     if (_p.hp <= 0) {
       if (_p.revives > 0) {
         _p.revives--;
@@ -1721,6 +1817,7 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _damageEnemy(Enemy e, double dmg, bool crit, [Offset? from]) {
+    dmg *= _comboDmgMul;
     e.hp -= dmg;
     e.flash = 0.1;
     _bursts.add(Burst(e.pos, crit ? 22 : 14));
@@ -2103,6 +2200,13 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _roomEnd() {
+    if (_roomKind == RoomKind.challenge) {
+      _p.obols += 50 + _floorIdx * 12;
+      _p.hp =
+          (_p.hp + _p.maxHp * 0.30).clamp(0, _p.maxHp).toDouble();
+      _texts.add(FloatText(_p.pos.translate(0, -28),
+          'CHALLENGE CLEAR!', const Color(0xFFFF9A3C)));
+    }
     _p.obols += 4 + _wave * 2;
     if (_wave >= kMaxWaves) {
       _victory();
@@ -2150,6 +2254,13 @@ class _GameScreenState extends State<GameScreen>
       DoorDef('👁', 'WATCHTOWER', '+0.2 view', DoorKind.reward,
           (p) => p.vision = (p.vision + 0.2).clamp(1.0, 2.6).toDouble()),
       _chaosDoor(),
+      // Special rooms — the door label hints, the room itself is the prize.
+      DoorDef('💎', 'TREASURE ROOM', 'empty room full of obols',
+          DoorKind.treasure, (_) {}),
+      DoorDef('⚔', 'CHALLENGE ROOM', 'more foes, bigger reward',
+          DoorKind.challenge, (_) {}),
+      DoorDef('⛩', 'SHRINE', 'a blessing — at a price',
+          DoorKind.shrine, (_) {}),
     ]..shuffle(_rng);
     return pool.take(n.clamp(2, pool.length).toInt()).toList();
   }
@@ -2194,6 +2305,19 @@ class _GameScreenState extends State<GameScreen>
       setState(_openBoon);
       return;
     }
+    switch (d.def.kind) {
+      case DoorKind.treasure:
+        _roomKind = RoomKind.treasure;
+        break;
+      case DoorKind.challenge:
+        _roomKind = RoomKind.challenge;
+        break;
+      case DoorKind.shrine:
+        _roomKind = RoomKind.shrine;
+        break;
+      default:
+        _roomKind = RoomKind.normal;
+    }
     d.def.apply(_p);
     _nextRoom();
   }
@@ -2202,17 +2326,60 @@ class _GameScreenState extends State<GameScreen>
     _wave++;
     _p.hp = (_p.hp + _p.maxHp * 0.12).clamp(0, _p.maxHp).toDouble();
     _genRoom();
+    if (_roomKind == RoomKind.shrine) {
+      _openShrine();
+    } else {
+      setState(() => _phase = Phase.playing);
+    }
+  }
+
+  List<List<dynamic>> _shrineOffers = const [];
+  void _openShrine() {
+    final all = <List<dynamic>>[
+      ['+30% damage', '−20% max HP', (Player p) {
+        p.damage *= 1.30;
+        p.maxHp = (p.maxHp * 0.8).clamp(1, 9999).toDouble();
+        p.hp = p.hp.clamp(1, p.maxHp).toDouble();
+      }],
+      ['+30% fire rate', '−25 move speed', (Player p) {
+        p.fireInterval *= 0.77;
+        p.speed = (p.speed - 25).clamp(60, 9999).toDouble();
+      }],
+      ['+1 projectile', '+0.3s dash CD', (Player p) {
+        p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt();
+        p.dashCd = (p.dashCd + 0.3).clamp(0.4, 5).toDouble();
+      }],
+      ['+15% crit chance', 'lose all obols', (Player p) {
+        p.critChance = (p.critChance + 0.15).clamp(0.0, 1.0).toDouble();
+        p.obols = 0;
+      }],
+      ['+1 Death Defiance', '−25% max MP', (Player p) {
+        p.revives += 1;
+        p.maxMp = (p.maxMp * 0.75).clamp(1, 9999).toDouble();
+        p.mp = p.mp.clamp(0, p.maxMp).toDouble();
+      }],
+    ]..shuffle(_rng);
+    _shrineOffers = all.take(2).toList();
+    setState(() => _phase = Phase.shrine);
+  }
+
+  void _pickShrine(int i) {
+    final offer = _shrineOffers[i];
+    (offer[2] as void Function(Player))(_p);
+    _texts.add(FloatText(_p.pos.translate(0, -32),
+        'SHRINE: ${offer[0]}', const Color(0xFFE0A0FF)));
+    _roomKind = RoomKind.normal;
     setState(() => _phase = Phase.playing);
   }
 
   void _gameOver() {
-    if (_wave > GameStats.bestWave) GameStats.bestWave = _wave;
+    GameStats.recordRunEnd(_wave, _floorIdx + 1, _p.kills, _p.obols);
     _awardShards();
     _phase = Phase.gameOver;
   }
 
   void _victory() {
-    if (_wave > GameStats.bestWave) GameStats.bestWave = _wave;
+    GameStats.recordRunEnd(_wave, _floorIdx + 1, _p.kills, _p.obols);
     _awardShards();
     _phase = Phase.victory;
   }
@@ -2361,6 +2528,7 @@ class _GameScreenState extends State<GameScreen>
                   ),
                 ),
                 if (_ready) _hud(),
+                if (_ready && _combo > 1) _comboBadge(),
                 if (_ready) _bossBar(),
                 if (_ready && _phase == Phase.playing) _abilityButton(),
                 if (_ready && play) _dashButton(),
@@ -2368,6 +2536,7 @@ class _GameScreenState extends State<GameScreen>
                 if (_phase == Phase.paused) _pauseOverlay(),
                 if (_phase == Phase.levelUp) _levelUpOverlay(),
                 if (_phase == Phase.shop) _shopOverlay(),
+                if (_phase == Phase.shrine) _shrineOverlay(),
                 if (_phase == Phase.gameOver) _endOverlay(false),
                 if (_phase == Phase.victory) _endOverlay(true),
               ],
@@ -2630,6 +2799,31 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
+  Widget _comboBadge() {
+    final tier = _combo >= 25 ? 2 : (_combo >= 10 ? 1 : 0);
+    final color = tier == 2
+        ? const Color(0xFFFF9A3C)
+        : (tier == 1 ? const Color(0xFFFFD45E) : Colors.white70);
+    return Positioned(
+      left: 12,
+      top: 78,
+      child: Row(children: [
+        Text('x$_combo',
+            style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w900,
+                fontSize: tier == 2 ? 22 : (tier == 1 ? 18 : 14))),
+        const SizedBox(width: 6),
+        if (tier > 0)
+          Text(tier == 2 ? 'INFERNO' : 'STREAK',
+              style: TextStyle(
+                  color: color.withValues(alpha: 0.85),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 10)),
+      ]),
+    );
+  }
+
   Widget _bar(double v, Color color, String? label, {double h = 11}) {
     return Stack(
       alignment: Alignment.center,
@@ -2670,6 +2864,55 @@ class _GameScreenState extends State<GameScreen>
         ),
       ),
     );
+  }
+
+  Widget _shrineOverlay() {
+    return _scrim(Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text('⛩ SHRINE',
+            style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFFE0A0FF))),
+        const SizedBox(height: 4),
+        const Text('each blessing has a price',
+            style: TextStyle(color: Colors.white60)),
+        const SizedBox(height: 18),
+        for (var i = 0; i < _shrineOffers.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _pickShrine(i),
+              child: Container(
+                width: 320,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xCC1F1D2E),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: const Color(0xFFE0A0FF), width: 1.5),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('+ ${_shrineOffers[i][0]}',
+                        style: const TextStyle(
+                            color: Color(0xFF8CFF98),
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14)),
+                    const SizedBox(height: 2),
+                    Text('− ${_shrineOffers[i][1]}',
+                        style: const TextStyle(
+                            color: Color(0xFFFF5C6C), fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    ));
   }
 
   Widget _levelUpOverlay() {
@@ -2783,7 +3026,19 @@ class _GameScreenState extends State<GameScreen>
         Text('🔷 +$_lastGain shards  (total ${MetaStore.shards})',
             style: const TextStyle(
                 color: Color(0xFF8CC8FF), fontWeight: FontWeight.w900)),
-        const SizedBox(height: 22),
+        const SizedBox(height: 14),
+        // Personal bests + lifetime totals (persisted across runs).
+        Text(
+            'BEST: floor ${GameStats.bestFloor} · '
+            'room ${GameStats.bestWave}',
+            style: const TextStyle(
+                color: Color(0xFFFFD45E), fontWeight: FontWeight.w900)),
+        Text(
+            '${GameStats.totalRuns} runs · '
+            '${GameStats.totalKills} kills · '
+            '${GameStats.totalObols} 💰 collected',
+            style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        const SizedBox(height: 18),
         _BigButton(
             label: 'PLAY AGAIN',
             color: const Color(0xFFFFD45E),
