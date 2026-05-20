@@ -307,7 +307,7 @@ const List<HeroDef> kHeroes = [
     accent: Color(0xFF4A4F5E),
     maxHp: 18,
     maxMp: 10,
-    speed: 118,
+    speed: 140,
     damage: 1.5,
     fireInterval: 0.70,
     projSpeed: 300,
@@ -327,7 +327,7 @@ const List<HeroDef> kHeroes = [
     body: Color(0xFF6FCF7B),
     accent: Color(0xFF2E6B36),
     maxHp: 6,
-    speed: 166,
+    speed: 186,
     damage: 1.2,
     fireInterval: 0.38,
     projSpeed: 470,
@@ -348,7 +348,7 @@ const List<HeroDef> kHeroes = [
     accent: Color(0xFF3E2E80),
     maxHp: 6,
     maxMp: 16,
-    speed: 138,
+    speed: 160,
     damage: 2.4,
     fireInterval: 0.88,
     projSpeed: 300,
@@ -368,7 +368,7 @@ const List<HeroDef> kHeroes = [
     accent: Color(0xFF4F2358),
     maxHp: 7,
     maxMp: 14,
-    speed: 146,
+    speed: 168,
     damage: 0.9,
     fireInterval: 0.50,
     projSpeed: 340,
@@ -389,7 +389,7 @@ const List<HeroDef> kHeroes = [
     accent: Color(0xFFE0436B),
     maxHp: 5,
     maxMp: 10,
-    speed: 204,
+    speed: 226,
     damage: 1.6,
     fireInterval: 0.30,
     projSpeed: 480,
@@ -409,7 +409,7 @@ const List<HeroDef> kHeroes = [
     accent: Color(0xFF7A521C),
     maxHp: 7,
     maxMp: 12,
-    speed: 150,
+    speed: 172,
     damage: 0.8,
     fireInterval: 0.16,
     projSpeed: 520,
@@ -795,6 +795,9 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
 
     final player = Player(kHeroes.first);
     player.pos = m.roomCenter(0);
+    // In the hub you're not fighting — let the player stride between altars
+    // instead of plodding at combat speed.
+    player.speed = 300;
     _p = player;
 
     final w = m.worldW, h = m.worldH;
@@ -802,36 +805,39 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
     _altars
       ..clear()
       ..addAll([
+        // Top wall — read-only / quick-access altars.
         Door(
-          Offset(w * 0.22, cy),
-          DoorDef('🪞', 'MIRROR OF GAINS', 'permanent stat upgrades',
-              DoorKind.shop, (_) {}),
-        ),
-        Door(
-          Offset(w * 0.78, cy),
-          DoorDef('🌞', 'DAILY CHALLENGE',
-              "today's seeded dungeon", DoorKind.shrine, (_) {}),
-        ),
-        Door(
-          Offset(cx, h * 0.25),
-          DoorDef('⚙', 'SETTINGS', 'audio · shake · haptics',
-              DoorKind.shrine, (_) {}),
-        ),
-        Door(
-          Offset(w * 0.38, h * 0.25),
+          Offset(w * 0.30, h * 0.22),
           DoorDef(
               '📖', 'BESTIARY', "foes you've faced", DoorKind.shrine, (_) {}),
         ),
         Door(
-          Offset(w * 0.62, h * 0.25),
+          Offset(cx, h * 0.20),
+          DoorDef('⚙', 'SETTINGS', 'audio · shake · haptics',
+              DoorKind.shrine, (_) {}),
+        ),
+        Door(
+          Offset(w * 0.70, h * 0.22),
           DoorDef(
               '🏆',
               'ACHIEVEMENTS',
               '${GameStats.achievements.length}/${kAchievements.length}',
               DoorKind.shrine, (_) {}),
         ),
+        // Left / right walls — heavier altars.
         Door(
-          Offset(cx, h * 0.78),
+          Offset(w * 0.18, cy + 30),
+          DoorDef('🪞', 'MIRROR OF GAINS', 'permanent stat upgrades',
+              DoorKind.shop, (_) {}),
+        ),
+        Door(
+          Offset(w * 0.82, cy + 30),
+          DoorDef('🌞', 'DAILY CHALLENGE',
+              "today's seeded dungeon", DoorKind.shrine, (_) {}),
+        ),
+        // Bottom wall — the exit out into the run.
+        Door(
+          Offset(cx, h * 0.82),
           DoorDef('⚔', 'BEGIN RUN', 'fight through the dungeon',
               DoorKind.reward, (_) {}),
         ),
@@ -2472,6 +2478,9 @@ class _GameScreenState extends State<GameScreen>
     }
     _bolts.removeWhere(
         (b) => b.life <= 0 || _map.blocksShot(b.pos.dx, b.pos.dy));
+    // Hard caps so volleys + auto-fire can't snowball draw cost.
+    if (_bolts.length > 80) _bolts.removeRange(0, _bolts.length - 80);
+    if (_ebolts.length > 40) _ebolts.removeRange(0, _ebolts.length - 40);
 
     for (final e in _ebolts) {
       e.pos += e.vel * dt;
@@ -4780,6 +4789,13 @@ class WorldPainter extends CustomPainter {
     for (final item in queue) {
       item.$2();
     }
+    // Small fast projectiles are drawn flat on top of the depth-sorted
+    // pass instead of going through it — saves a closure + tuple per bolt
+    // per frame, which adds up fast during volley-heavy combat.
+    _paintProjectiles(canvas);
+    // Doors render last (in world space) so they always sit above tiles,
+    // walls, entities, and bursts — and their label is never occluded.
+    _paintDoorsOverlay(canvas);
 
     canvas.restore();
 
@@ -4848,6 +4864,113 @@ class WorldPainter extends CustomPainter {
     _mapBgCache.clear();
     _poolTiles.clear();
     _wallEntries.clear();
+  }
+
+  // Cheap projectile pass: draws every bolt + enemy bolt directly with two
+  // reused Paint objects. No depth-sort, no per-bolt closures.
+  void _paintProjectiles(Canvas canvas) {
+    final glow = Paint();
+    final core = Paint();
+    for (final b in bolts) {
+      final s = isoProject(b.pos);
+      final dx = s.dx - b.pos.dx, dy = s.dy - b.pos.dy;
+      canvas.save();
+      canvas.translate(dx, dy);
+      final col = b.crit
+          ? const Color(0xFFFFE066)
+          : (b.splash > 0 ? const Color(0xFFFF9A3C) : Colors.white);
+      final cr = b.splash > 0 ? 7.0 : (b.crit ? 6.0 : 4.0);
+      glow.color = col.withValues(alpha: 0.3);
+      core.color = col;
+      canvas.drawCircle(b.pos, cr + 4, glow);
+      canvas.drawCircle(b.pos, cr, core);
+      canvas.restore();
+    }
+    for (final e in ebolts) {
+      final s = isoProject(e.pos);
+      final dx = s.dx - e.pos.dx, dy = s.dy - e.pos.dy;
+      canvas.save();
+      canvas.translate(dx, dy);
+      final (g, c) = switch (e.kind) {
+        1 => (const Color(0xFFA9E8FF), const Color(0xFFE6F8FF)), // frost
+        2 => (const Color(0xFFFFA84C), const Color(0xFFFFE2B0)), // fire
+        _ => (const Color(0xFFFF4D5E), const Color(0xFFFF6B79)),
+      };
+      glow.color = g.withValues(alpha: 0.3);
+      core.color = c;
+      canvas.drawCircle(e.pos, 9, glow);
+      canvas.drawCircle(e.pos, 4.5, core);
+      canvas.restore();
+    }
+  }
+
+  void _paintDoorsOverlay(Canvas canvas) {
+    if (doors.isEmpty) return;
+    for (final d in doors) {
+      _projAt(canvas, d.pos, 0, () {
+        final pulse = 0.5 + 0.5 * sin(time * 4 + d.pos.dx);
+        canvas.drawCircle(d.pos, d.r + 12,
+            Paint()..color = const Color(0xFFFFD45E).withValues(alpha: 0.2));
+        final arch = RRect.fromRectAndRadius(
+          Rect.fromCenter(center: d.pos, width: d.r * 2, height: d.r * 2.4),
+          Radius.circular(d.r),
+        );
+        canvas.drawRRect(arch, Paint()..color = _shd(floor.bg, 0.5));
+        canvas.drawRRect(
+            arch,
+            Paint()
+              ..color = Color.lerp(
+                  const Color(0xFFFFD45E), Colors.white, pulse * 0.4)!
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 4);
+        final tp = TextPainter(
+          text: TextSpan(
+              text: d.def.icon,
+              style: const TextStyle(fontSize: 26, fontFamily: 'NotoEmoji')),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, d.pos - Offset(tp.width / 2, tp.height / 2));
+        // Label is drawn over a dark plate so the title + desc are legible
+        // no matter what tile / wall is behind the door.
+        final lp = TextPainter(
+          text: TextSpan(
+              style: const TextStyle(
+                  fontFamily: 'RobotoMono',
+                  fontFamilyFallback: ['NotoEmoji']),
+              children: [
+                TextSpan(
+                    text: '${d.def.title}\n',
+                    style: const TextStyle(
+                        color: Color(0xFFFFD45E),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        height: 1.3)),
+                TextSpan(
+                    text: d.def.desc,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11)),
+              ]),
+          textAlign: TextAlign.center,
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: 200);
+        final labelTop = d.pos.dy + d.r * 1.2 + 6;
+        final plate = RRect.fromRectAndRadius(
+            Rect.fromLTWH(d.pos.dx - lp.width / 2 - 8, labelTop - 4,
+                lp.width + 16, lp.height + 8),
+            const Radius.circular(8));
+        canvas.drawRRect(
+            plate, Paint()..color = const Color(0xCC0E0C16));
+        canvas.drawRRect(
+            plate,
+            Paint()
+              ..color = const Color(0x33FFD45E)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1);
+        lp.paint(canvas, Offset(d.pos.dx - lp.width / 2, labelTop));
+      });
+    }
   }
 
   void _paintMap(Canvas canvas, GameMap m) {
@@ -5082,58 +5205,10 @@ class WorldPainter extends CustomPainter {
       }));
     }
 
-    for (final d in doors) {
-      add(dep(d.pos), () => _projAt(canvas, d.pos, 0, () {
-      final pulse = 0.5 + 0.5 * sin(time * 4 + d.pos.dx);
-      canvas.drawCircle(d.pos, d.r + 12,
-          Paint()..color = const Color(0xFFFFD45E).withValues(alpha: 0.2));
-      final arch = RRect.fromRectAndRadius(
-        Rect.fromCenter(center: d.pos, width: d.r * 2, height: d.r * 2.4),
-        Radius.circular(d.r),
-      );
-      canvas.drawRRect(arch, Paint()..color = _shd(floor.bg, 0.5));
-      canvas.drawRRect(
-          arch,
-          Paint()
-            ..color = Color.lerp(
-                const Color(0xFFFFD45E), Colors.white, pulse * 0.4)!
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 4);
-      final tp = TextPainter(
-        text: TextSpan(
-            text: d.def.icon,
-            style: const TextStyle(fontSize: 26, fontFamily: 'NotoEmoji')),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(canvas, d.pos - Offset(tp.width / 2, tp.height / 2));
-      // label so the player knows what each door grants on approach
-      final lp = TextPainter(
-        text: TextSpan(
-            style: const TextStyle(
-                fontFamily: 'RobotoMono',
-                fontFamilyFallback: ['NotoEmoji']),
-            children: [
-          TextSpan(
-              text: '${d.def.title}\n',
-              style: const TextStyle(
-                  color: Color(0xFFFFD45E),
-                  fontWeight: FontWeight.w900,
-                  fontSize: 13,
-                  height: 1.3)),
-          TextSpan(
-              text: d.def.desc,
-              style: const TextStyle(
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 11)),
-        ]),
-        textAlign: TextAlign.center,
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: 180);
-      lp.paint(canvas,
-          Offset(d.pos.dx - lp.width / 2, d.pos.dy + d.r * 1.2 + 6));
-      }));
-    }
+    // Doors are intentionally NOT added to the depth-sorted queue — they
+    // are drawn on top of every map / entity in `_paintDoorsOverlay` after
+    // the queue is flushed, so the arched portal and its label are never
+    // hidden behind walls or props.
 
     for (final b in bursts) {
       add(dep(b.pos), () => _projAt(canvas, b.pos, 0, () {
@@ -5314,29 +5389,7 @@ class WorldPainter extends CustomPainter {
       }));
     }
 
-    for (final b in bolts) {
-      add(dep(b.pos), () => _projAt(canvas, b.pos, 0, () {
-      final col = b.crit
-          ? const Color(0xFFFFE066)
-          : (b.splash > 0 ? const Color(0xFFFF9A3C) : Colors.white);
-      final cr = b.splash > 0 ? 7.0 : (b.crit ? 6.0 : 4.0);
-      canvas.drawCircle(
-          b.pos, cr + 4, Paint()..color = col.withValues(alpha: 0.3));
-      canvas.drawCircle(b.pos, cr, Paint()..color = col);
-      }));
-    }
-    for (final e in ebolts) {
-      add(dep(e.pos), () => _projAt(canvas, e.pos, 0, () {
-        final (glow, core) = switch (e.kind) {
-          1 => (const Color(0xFFA9E8FF), const Color(0xFFE6F8FF)), // frost
-          2 => (const Color(0xFFFFA84C), const Color(0xFFFFE2B0)), // fire
-          _ => (const Color(0xFFFF4D5E), const Color(0xFFFF6B79)),
-        };
-        canvas.drawCircle(
-            e.pos, 9, Paint()..color = glow.withValues(alpha: 0.3));
-        canvas.drawCircle(e.pos, 4.5, Paint()..color = core);
-      }));
-    }
+    // (bolts + ebolts moved to _paintProjectiles to skip the depth queue)
 
     add(dep(player.pos), () => _projAt(canvas, player.pos, 0, () {
     if (player.invuln > 0) {
