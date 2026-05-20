@@ -25,6 +25,7 @@ Future<void> main() async {
 class Sfx {
   static final Map<String, AudioPlayer> _p = {};
   static const _names = ['hit', 'kill', 'dash', 'pickup', 'door'];
+  static final Random _rng = Random();
 
   static Future<void> init() async {
     for (final n in _names) {
@@ -37,14 +38,24 @@ class Sfx {
     }
   }
 
-  static void play(String name, {double vol = 0.6}) {
+  // `pitch` overrides the playback rate directly; `jitter` adds a small
+  // random ± to the default rate so repeated kills don't feel monotone.
+  static void play(String name,
+      {double vol = 0.6, double pitch = 1.0, double jitter = 0.0}) {
     final ap = _p[name];
     if (ap == null) return;
     final v = (vol * Settings.sfxVol).clamp(0.0, 1.0).toDouble();
     if (v <= 0.0) return;
+    final rate =
+        (pitch + (jitter > 0 ? (_rng.nextDouble() * 2 - 1) * jitter : 0.0))
+            .clamp(0.5, 2.0)
+            .toDouble();
     () async {
       try {
         await ap.setVolume(v);
+        try {
+          await ap.setPlaybackRate(rate);
+        } catch (_) {/* not all platforms expose pitch */}
         await ap.seek(Duration.zero);
         await ap.resume();
       } catch (_) {}
@@ -125,6 +136,11 @@ const List<MetaUpgrade> kMeta = [
   MetaUpgrade('gold', 'TRUST FUND', '+15 starting obols per level', 5),
   MetaUpgrade('vis', 'FAR SIGHT', '+0.10 base view per level', 5),
   MetaUpgrade('rev', 'NINE LIVES', '+1 Death Defiance per level', 3),
+  MetaUpgrade('crit', 'SHARP EYE', '+3% crit chance per level', 5),
+  MetaUpgrade('dash', 'FLEET FOOT', '−0.1s dash cooldown per level', 4),
+  MetaUpgrade('life', 'VAMPIRIC', '+0.1 lifesteal per level', 4),
+  MetaUpgrade('mp', 'FOCUSED MIND', '+0.4 MP regen per level', 4),
+  MetaUpgrade('splash', 'BLAST CASTER', '+6 splash radius per level', 4),
 ];
 
 class MetaStore {
@@ -773,74 +789,112 @@ class _HomeScreenState extends State<HomeScreen> {
                 'Earn shards every run. Spend them for permanent boosts.',
                 style: TextStyle(color: Colors.white54, fontSize: 12)),
           ),
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: kMeta.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, i) {
-                final m = kMeta[i];
-                final lv = MetaStore.lvlOf(m.id);
-                final maxed = lv >= m.maxLvl;
-                final cost = MetaStore.costFor(m.id);
-                final afford = MetaStore.shards >= cost;
-                return InkWell(
-                  borderRadius: BorderRadius.circular(14),
-                  onTap: maxed
-                      ? null
-                      : () {
-                          if (MetaStore.buy(m)) setState(() {});
-                        },
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1F1D2E),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color: maxed
-                              ? const Color(0xFF8CFF98)
-                              : (afford
-                                  ? const Color(0xFF8CC8FF)
-                                  : Colors.white24)),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(m.title,
-                                  style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w900,
-                                      color: Colors.white)),
-                              Text(m.desc,
-                                  style: const TextStyle(
-                                      color: Colors.white54, fontSize: 12)),
-                              const SizedBox(height: 4),
-                              Text('level $lv / ${m.maxLvl}',
-                                  style: const TextStyle(
-                                      color: Color(0xFF8CC8FF),
-                                      fontSize: 11)),
-                            ],
-                          ),
-                        ),
-                        Text(maxed ? 'MAX' : '🔷$cost',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w900,
-                                color: maxed
-                                    ? const Color(0xFF8CFF98)
-                                    : const Color(0xFF8CC8FF))),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
+          Expanded(child: _buildTree()),
         ],
       ),
     );
+  }
+
+  // Mirror-of-Gains is split into three thematic branches so the meta
+  // upgrade list reads like a small tree rather than a flat shopping list.
+  static const Map<String, List<String>> _branches = {
+    'COMBAT': ['dmg', 'crit', 'splash'],
+    'SURVIVAL': ['hp', 'rev', 'life'],
+    'UTILITY': ['spd', 'dash', 'vis', 'mp', 'gold'],
+  };
+
+  Widget _buildTree() {
+    final children = <Widget>[];
+    _branches.forEach((branch, ids) {
+      children.add(Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+        child: Text(branch,
+            style: const TextStyle(
+                color: Color(0xFFFFD45E),
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.6)),
+      ));
+      for (final id in ids) {
+        final m = kMeta.firstWhere((x) => x.id == id);
+        children.add(Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+          child: _metaRow(m),
+        ));
+      }
+    });
+    return ListView(children: children);
+  }
+
+  Widget _metaRow(MetaUpgrade m) {
+    final lv = MetaStore.lvlOf(m.id);
+    final maxed = lv >= m.maxLvl;
+    final cost = MetaStore.costFor(m.id);
+    final afford = MetaStore.shards >= cost;
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: maxed
+          ? null
+          : () {
+              if (MetaStore.buy(m)) setState(() {});
+            },
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1F1D2E),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: maxed
+                  ? const Color(0xFF8CFF98)
+                  : (afford
+                      ? const Color(0xFF8CC8FF)
+                      : Colors.white24)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(m.title,
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white)),
+                  Text(m.desc,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  _metaPips(lv, m.maxLvl),
+                ],
+              ),
+            ),
+            Text(maxed ? 'MAX' : '🔷$cost',
+                style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: maxed
+                        ? const Color(0xFF8CFF98)
+                        : const Color(0xFF8CC8FF))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _metaPips(int lv, int max) {
+    return Row(children: [
+      for (int i = 0; i < max; i++)
+        Container(
+          width: 12,
+          height: 6,
+          margin: const EdgeInsets.only(right: 3),
+          decoration: BoxDecoration(
+            color: i < lv
+                ? const Color(0xFF8CC8FF)
+                : Colors.white12,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+    ]);
   }
 }
 
@@ -1182,10 +1236,10 @@ class Player {
         fireInterval = def.fireInterval,
         projSpeed = def.projSpeed,
         range = def.range,
-        critChance = def.critChance,
+        critChance = def.critChance + MetaStore.lvlOf('crit') * 0.03,
         projectiles = def.projectiles,
-        lifesteal = def.lifesteal,
-        splash = def.splash,
+        lifesteal = def.lifesteal + MetaStore.lvlOf('life') * 0.1,
+        splash = def.splash + MetaStore.lvlOf('splash') * 6,
         pierce = def.pierce,
         dot = def.dot,
         thorns = def.thorns,
@@ -1198,7 +1252,7 @@ class Player {
   double maxHp;
   double mp;
   double maxMp;
-  double mpRegen = 1.0;
+  double mpRegen = 1.0 + MetaStore.lvlOf('mp') * 0.4;
   double speed;
   double damage;
   double fireInterval;
@@ -1218,7 +1272,7 @@ class Player {
   // Hades-style kit
   int revives = 1 + MetaStore.lvlOf('rev'); // Death Defiance charges
   double dashTimer = 0;
-  double dashCd = 1.5;
+  double dashCd = (1.5 - MetaStore.lvlOf('dash') * 0.1).clamp(0.4, 5);
   int zeus = 0; // chain-lightning jumps
   double knockback = 0; // Poseidon
   double doomAmt = 0; // Ares delayed burst
@@ -1228,6 +1282,8 @@ class Player {
   double hurtFlash = 0;
   double frostT = 0; // movement-slow timer applied by FROST enemies
   bool frostImmune = false;
+  double fireT = 0; // burning damage-over-time from fire bolts
+  double fireDps = 0;
   double abilityTimer = 0;
   double invuln = 0;
   double frenzy = 0;
@@ -1274,6 +1330,12 @@ class Enemy {
   double doomT = 0;
   double doomAmt = 0;
   bool elite = false;
+  // Bolt flavor this ranged enemy fires (0=normal, 1=frost, 2=fire).
+  int boltKind = 0;
+  // Boss nova attack telegraphs (boss-only state machine).
+  double novaT = 5.0; // time until next nova starts winding up
+  double novaTele = 0; // current telegraph timer (0 = idle, >0 = winding up)
+  double novaRadius = 0;
 }
 
 class Bolt {
@@ -1291,11 +1353,13 @@ class Bolt {
 }
 
 class EBolt {
-  EBolt(this.pos, this.vel, this.damage);
+  EBolt(this.pos, this.vel, this.damage, {this.kind = 0});
   Offset pos;
   Offset vel;
   double damage;
   double life = 4;
+  // 0=normal violet bolt, 1=frost (chills on hit), 2=fire (lingering DoT)
+  final int kind;
 }
 
 class Orb {
@@ -1673,6 +1737,10 @@ class _GameScreenState extends State<GameScreen>
       _facing = _moveDir;
     }
     if (_p.frostT > 0) _p.frostT -= dt;
+    if (_p.fireT > 0) {
+      _p.fireT -= dt;
+      _p.hp -= _p.fireDps * dt; // burn ticks bypass i-frames + screen shake
+    }
     if (_p.hurtFlash > 0) _p.hurtFlash -= dt;
     if (_p.invuln > 0) _p.invuln -= dt;
     if (_p.frenzy > 0) _p.frenzy -= dt;
@@ -1818,6 +1886,12 @@ class _GameScreenState extends State<GameScreen>
       e.life -= dt;
       if ((e.pos - _p.pos).distance < _p.radius + 5) {
         _hurtPlayer(e.damage);
+        if (e.kind == 1 && !_p.frostImmune) {
+          _p.frostT = max(_p.frostT, 1.4); // frost bolt chills
+        } else if (e.kind == 2) {
+          _p.fireT = max(_p.fireT, 2.2); // fire bolt burns over time
+          _p.fireDps = max(_p.fireDps, e.damage * 0.6);
+        }
         e.life = 0;
         if (_phase != Phase.playing) return;
       }
@@ -1829,6 +1903,71 @@ class _GameScreenState extends State<GameScreen>
       final dir = _p.pos - e.pos;
       final d = dir.distance;
       final rad = e.radius * 0.7;
+      // Boss telegraphed nova: per-floor flavor, charges up then explodes.
+      if (e.kind == 3) {
+        if (e.novaTele > 0) {
+          // Winding up: grow the telegraph ring, then trigger the explosion.
+          e.novaTele -= dt;
+          e.novaRadius = (160 + 60 * _floorIdx).toDouble();
+          if (e.novaTele <= 0) {
+            _bursts.add(Burst(e.pos, e.novaRadius));
+            _shake = max(_shake, 10.0);
+            Sfx.play('kill', vol: 0.8);
+            // AoE explosion damages the player if inside the ring.
+            if ((_p.pos - e.pos).distance < e.novaRadius) {
+              _hurtPlayer(e.damage * 1.4);
+              if (_phase != Phase.playing) return;
+            }
+            // Per-floor signature attack on detonation.
+            switch (_floorIdx) {
+              case 0: // Floor 1 — splash nova only.
+                break;
+              case 1: // Floor 2 — 8-bolt radial fan of standard bolts.
+                for (int i = 0; i < 8; i++) {
+                  final a = i * (2 * pi / 8);
+                  _ebolts.add(EBolt(e.pos,
+                      Offset(cos(a), sin(a)) * 180, e.damage));
+                }
+                break;
+              case 2: // Floor 3 — 6 frost bolts (a colder, slower fan).
+                for (int i = 0; i < 6; i++) {
+                  final a = i * (2 * pi / 6);
+                  _ebolts.add(EBolt(e.pos,
+                      Offset(cos(a), sin(a)) * 160, e.damage,
+                      kind: 1));
+                }
+                break;
+              case 3: // Floor 4 — summon a kamikaze wingman beside the boss.
+                _enemies.add(Enemy(
+                  pos: e.pos + Offset(40, 0),
+                  hp: (2 + _wave * 0.4) * _floor.hpMul,
+                  speed: (130 + _wave) * _floor.spdMul,
+                  damage: 2.0 * _floor.dmgMul,
+                  radius: 12,
+                  kind: 8,
+                  bounty: 1,
+                  xp: 1,
+                ));
+                break;
+              default: // Floor 5+ — fiery 8-bolt fan that burns.
+                for (int i = 0; i < 8; i++) {
+                  final a = i * (2 * pi / 8) + 0.2;
+                  _ebolts.add(EBolt(e.pos,
+                      Offset(cos(a), sin(a)) * 200, e.damage,
+                      kind: 2));
+                }
+            }
+            e.novaTele = 0;
+            e.novaRadius = 0;
+            e.novaT = 4.5; // cooldown until next nova
+          }
+        } else {
+          e.novaT -= dt;
+          if (e.novaT <= 0) {
+            e.novaTele = 1.1; // 1.1s telegraph window
+          }
+        }
+      }
       if (e.kind == 4) {
         if (d < 220 && d > 0.01) {
           e.pos = _slide(e.pos, -dir / d * e.speed * dt, rad);
@@ -1838,7 +1977,7 @@ class _GameScreenState extends State<GameScreen>
         e.shootTimer -= dt;
         if (e.shootTimer <= 0 && d < 460 && d > 0.01) {
           e.shootTimer = 1.7;
-          _ebolts.add(EBolt(e.pos, dir / d * 220, e.damage));
+          _ebolts.add(EBolt(e.pos, dir / d * 220, e.damage, kind: e.boltKind));
         }
       } else if (d > 0.01) {
         e.pos = _slide(e.pos, dir / d * e.speed * dt, rad);
@@ -1924,7 +2063,10 @@ class _GameScreenState extends State<GameScreen>
       if (e.hp <= 0) {
         if (e.kind == 3) _shake = max(_shake, 11.0);
         _bursts.add(Burst(e.pos, e.kind == 3 ? 80 : 32));
-        Sfx.play('kill', vol: e.kind == 3 ? 0.85 : 0.55);
+        Sfx.play('kill',
+            vol: e.kind == 3 ? 0.85 : 0.55,
+            pitch: e.kind == 3 ? 0.7 : (1.0 + min(_combo, 12) * 0.02),
+            jitter: e.kind == 3 ? 0.0 : 0.08);
         _shake = max(_shake, e.kind == 3 ? 11.0 : 2.0);
         _orbs.add(Orb(e.pos, e.xp));
         _p.obols += e.bounty;
@@ -1976,7 +2118,10 @@ class _GameScreenState extends State<GameScreen>
     e.hp -= dmg;
     e.flash = 0.1;
     _bursts.add(Burst(e.pos, crit ? 22 : 14));
-    Sfx.play('hit', vol: crit ? 0.7 : 0.45);
+    Sfx.play('hit',
+        vol: crit ? 0.7 : 0.45,
+        pitch: crit ? 1.25 : 1.0,
+        jitter: 0.06);
     if (crit) _shake = max(_shake, 4.0);
     _texts.add(FloatText(
       e.pos.translate(0, -e.radius),
@@ -2358,6 +2503,17 @@ class _GameScreenState extends State<GameScreen>
         e.hp *= Loadout.enemyMul;
         e.damage *= Loadout.enemyMul;
         e.speed *= 1 + Loadout.heat * 0.03;
+      }
+      // Pick bolt flavor for ranged shooters based on floor depth.
+      if (e.kind == 4) {
+        final r = _rng.nextDouble();
+        if (_floorIdx >= 3 && r < 0.30) {
+          e.boltKind = 2; // fire bolt
+        } else if (_floorIdx >= 2 && r < 0.55) {
+          e.boltKind = 1; // frost bolt
+        } else {
+          e.boltKind = 0;
+        }
       }
     }
   }
@@ -4152,6 +4308,20 @@ class WorldPainter extends CustomPainter {
               ..color = base.withValues(alpha: 0.25)
               ..style = PaintingStyle.stroke
               ..strokeWidth = 3);
+        // Boss nova telegraph: a fattening yellow ring that flashes red on impact.
+        if (e.novaTele > 0 && e.novaRadius > 0) {
+          final t = (1.1 - e.novaTele).clamp(0.0, 1.1) / 1.1; // 0 → 1
+          final col = Color.lerp(const Color(0xFFFFD45E),
+                  const Color(0xFFFF3B5C), t * t) ??
+              const Color(0xFFFFD45E);
+          canvas.drawCircle(
+              e.pos,
+              e.novaRadius * t,
+              Paint()
+                ..color = col.withValues(alpha: 0.18 + 0.35 * t)
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 3 + 3 * t);
+        }
       }
       canvas.drawCircle(
         e.pos,
@@ -4239,9 +4409,14 @@ class WorldPainter extends CustomPainter {
     }
     for (final e in ebolts) {
       add(dep(e.pos), () => _projAt(canvas, e.pos, 0, () {
-      canvas.drawCircle(e.pos, 9,
-          Paint()..color = const Color(0xFFFF4D5E).withValues(alpha: 0.3));
-      canvas.drawCircle(e.pos, 4.5, Paint()..color = const Color(0xFFFF6B79));
+        final (glow, core) = switch (e.kind) {
+          1 => (const Color(0xFFA9E8FF), const Color(0xFFE6F8FF)), // frost
+          2 => (const Color(0xFFFFA84C), const Color(0xFFFFE2B0)), // fire
+          _ => (const Color(0xFFFF4D5E), const Color(0xFFFF6B79)),
+        };
+        canvas.drawCircle(
+            e.pos, 9, Paint()..color = glow.withValues(alpha: 0.3));
+        canvas.drawCircle(e.pos, 4.5, Paint()..color = core);
       }));
     }
 
