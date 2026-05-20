@@ -1829,6 +1829,9 @@ class _GameScreenState extends State<GameScreen>
   int _combo = 0;
   double _comboT = 0;
   RoomKind _roomKind = RoomKind.normal;
+  // Hades-style room flow: the player spawns on `_entrySide` of the map and
+  // exit doors carve through the opposite wall. 0=left, 1=top, 2=right, 3=bottom.
+  int _entrySide = 3;
   double get _comboFireMul =>
       _combo >= 25 ? 0.7 : (_combo >= 10 ? 0.85 : 1.0);
   double get _comboDmgMul =>
@@ -1878,8 +1881,9 @@ class _GameScreenState extends State<GameScreen>
 
   void _genRoom() {
     _map = GameMap.generate(_rng, _size.width, _size.height, _wave);
-    _p.pos = _map.roomCenter(0); // arrive at the entry gate
-    _map.clearDisk(_p.pos.dx, _p.pos.dy, 2.4); // never spawn boxed in
+    final entryPos = _edgeSpawn(_entrySide);
+    _p.pos = entryPos;
+    _map.clearDisk(_p.pos.dx, _p.pos.dy, 3.2); // wide gateway in the entry wall
     _enemies.clear();
     _bolts.clear();
     _ebolts.clear();
@@ -1965,6 +1969,7 @@ class _GameScreenState extends State<GameScreen>
     _p = Player(widget.def);
     Loadout.keepsake?.apply(_p);
     _wave = 1;
+    _entrySide = _rng.nextInt(4); // first room's entry wall is random
     _shake = 0;
     _combo = 0;
     _comboT = 0;
@@ -2928,24 +2933,26 @@ class _GameScreenState extends State<GameScreen>
     }
     if (_wave - 1 > GameStats.bestWave) GameStats.bestWave = _wave - 1;
     _doors.clear();
-    final rc = _map.rooms.length;
+    final exitSide = _oppositeSide(_entrySide);
     if (_bossWave) {
+      final slots = _edgeDoorSlots(exitSide, 1);
       _doors.add(Door(
-        _map.roomCenter(rc - 1),
+        slots.isNotEmpty ? slots.first : _map.roomCenter(_map.rooms.length - 1),
         DoorDef('🛒', "CHARON'S SHOP", 'spend your obols', DoorKind.shop,
             (_) {}),
       ));
     } else {
-      final maxGates = (rc - 1).clamp(2, 4).toInt();
-      final n = (2 + _rng.nextInt(3)).clamp(2, maxGates).toInt();
+      final n = 2 + _rng.nextInt(2); // 2 or 3 doors on the exit wall
       final picks = _rollDoorDefs(n);
-      for (var i = 0; i < n; i++) {
-        _doors.add(Door(_map.roomCenter(rc - 1 - i), picks[i]));
+      final slots = _edgeDoorSlots(exitSide, n);
+      for (var i = 0; i < n && i < slots.length; i++) {
+        _doors.add(Door(slots[i], picks[i]));
       }
     }
-    // doors must always be reachable — clear any pool/wall around them
+    // Doors must always be reachable — clear pools/walls around them. The
+    // disk also carves the archway into the wall the door sits in.
     for (final d in _doors) {
-      _map.clearDisk(d.pos.dx, d.pos.dy, 2.4);
+      _map.clearDisk(d.pos.dx, d.pos.dy, 2.6);
     }
     _phase = Phase.roomCleared;
   }
@@ -3039,12 +3046,136 @@ class _GameScreenState extends State<GameScreen>
   void _nextRoom() {
     _wave++;
     _p.hp = (_p.hp + _p.maxHp * 0.12).clamp(0, _p.maxHp).toDouble();
+    // Each new room flips the spawn side: you arrive from the wall opposite
+    // the door you just walked through, then exit through the far wall again.
+    _entrySide = _oppositeSide(_entrySide);
     _genRoom();
     if (_roomKind == RoomKind.shrine) {
       _openShrine();
     } else {
       setState(() => _phase = Phase.playing);
     }
+  }
+
+  int _oppositeSide(int s) => (s + 2) % 4;
+
+  // Find a floor tile pressed against the chosen edge of the map's floor
+  // bounding box, biased toward the perpendicular middle so the gateway
+  // lines up visually with the wall it sits in.
+  Offset _edgeSpawn(int side) {
+    final b = _floorBounds();
+    if (b == null) return _map.roomCenter(0);
+    final cell = _map.cell;
+    final isVertical = side == 0 || side == 2;
+    final minC = b.left.toInt(),
+        maxC = b.right.toInt(),
+        minR = b.top.toInt(),
+        maxR = b.bottom.toInt();
+    Point<int>? best;
+    int bestPerp = 1 << 30;
+    final midR = (minR + maxR) ~/ 2;
+    final midC = (minC + maxC) ~/ 2;
+    for (int r = minR; r <= maxR; r++) {
+      for (int c = minC; c <= maxC; c++) {
+        if (_map.tt(c, r) != 1) continue;
+        final edgeDist = switch (side) {
+          0 => c - minC,
+          1 => r - minR,
+          2 => maxC - c,
+          _ => maxR - r,
+        };
+        if (edgeDist > 2) continue;
+        final perp = isVertical ? (r - midR).abs() : (c - midC).abs();
+        if (perp < bestPerp) {
+          bestPerp = perp;
+          best = Point(c, r);
+        }
+      }
+    }
+    if (best == null) return _map.roomCenter(0);
+    return Offset((best.x + 0.5) * cell, (best.y + 0.5) * cell);
+  }
+
+  // Evenly distribute `n` door anchors along the floor edge on `side`,
+  // each snapped to the most edgeward floor tile in its slice. Doors land
+  // on the last walkable tile so clearDisk later carves a notch in the wall.
+  List<Offset> _edgeDoorSlots(int side, int n) {
+    final b = _floorBounds();
+    if (b == null) return const [];
+    final cell = _map.cell;
+    final isVertical = side == 0 || side == 2;
+    final minC = b.left.toInt(),
+        maxC = b.right.toInt(),
+        minR = b.top.toInt(),
+        maxR = b.bottom.toInt();
+    final line = <Point<int>>[];
+    if (isVertical) {
+      for (int r = minR; r <= maxR; r++) {
+        int? hit;
+        if (side == 0) {
+          for (int c = minC; c <= maxC; c++) {
+            if (_map.tt(c, r) == 1) {
+              hit = c;
+              break;
+            }
+          }
+        } else {
+          for (int c = maxC; c >= minC; c--) {
+            if (_map.tt(c, r) == 1) {
+              hit = c;
+              break;
+            }
+          }
+        }
+        if (hit != null) line.add(Point(hit, r));
+      }
+    } else {
+      for (int c = minC; c <= maxC; c++) {
+        int? hit;
+        if (side == 1) {
+          for (int r = minR; r <= maxR; r++) {
+            if (_map.tt(c, r) == 1) {
+              hit = r;
+              break;
+            }
+          }
+        } else {
+          for (int r = maxR; r >= minR; r--) {
+            if (_map.tt(c, r) == 1) {
+              hit = r;
+              break;
+            }
+          }
+        }
+        if (hit != null) line.add(Point(c, hit));
+      }
+    }
+    if (line.isEmpty) return const [];
+    final picks = <Offset>[];
+    for (int i = 0; i < n; i++) {
+      final t = (i + 1) / (n + 1);
+      final idx = (t * line.length).floor().clamp(0, line.length - 1);
+      final tile = line[idx];
+      picks.add(Offset((tile.x + 0.5) * cell, (tile.y + 0.5) * cell));
+    }
+    return picks;
+  }
+
+  Rect? _floorBounds() {
+    int minC = _map.cols, maxC = -1, minR = _map.rows, maxR = -1;
+    for (int r = 0; r < _map.rows; r++) {
+      for (int c = 0; c < _map.cols; c++) {
+        if (_map.tt(c, r) == 1) {
+          if (c < minC) minC = c;
+          if (c > maxC) maxC = c;
+          if (r < minR) minR = r;
+          if (r > maxR) maxR = r;
+        }
+      }
+    }
+    if (maxC < 0) return null;
+    return Rect.fromLTRB(
+        minC.toDouble(), minR.toDouble(), maxC.toDouble(), maxR.toDouble());
   }
 
   List<List<dynamic>> _shrineOffers = const [];
