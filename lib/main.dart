@@ -1328,8 +1328,10 @@ class _GameScreenState extends State<GameScreen>
 
   Rect get _abilityRect =>
       Rect.fromLTWH(_size.width - 98, _size.height - 108, 78, 78);
-  Rect get _dashRect => Rect.fromLTWH(20, _size.height - 108, 72, 72);
-  Rect get _pauseRect => Rect.fromLTWH(_size.width - 56, 84, 42, 42);
+  Rect get _dashRect =>
+      Rect.fromLTWH(_size.width - 95, _size.height - 196, 72, 72);
+  // Pause sits just below the top-right minimap.
+  Rect get _pauseRect => Rect.fromLTWH(_size.width - 50, 116, 36, 36);
 
   @override
   void initState() {
@@ -2520,7 +2522,7 @@ class _GameScreenState extends State<GameScreen>
     if (boss == null) return const SizedBox.shrink();
     final frac = (boss.hp / boss.maxHp).clamp(0.0, 1.0).toDouble();
     return Positioned(
-      top: 134,
+      top: 160,
       left: 30,
       right: 30,
       child: Column(
@@ -2554,14 +2556,16 @@ class _GameScreenState extends State<GameScreen>
   }
 
   Widget _hud() {
+    const lblColor = Color(0xFFFFD45E);
     return Positioned(
       top: 0,
       left: 0,
-      right: 0,
+      // Leave the top-right corner for the minimap.
+      right: 116,
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
           child: Column(
             children: [
               Row(
@@ -2572,13 +2576,13 @@ class _GameScreenState extends State<GameScreen>
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                             fontWeight: FontWeight.w900,
-                            fontSize: 12,
-                            color: Color(0xFFFFD45E))),
+                            fontSize: 10,
+                            color: lblColor)),
                   ),
                   Text('R$_wave/$kMaxWaves',
                       style: const TextStyle(
                           fontWeight: FontWeight.w900,
-                          fontSize: 12,
+                          fontSize: 10,
                           color: Colors.white70)),
                   Text(
                       _phase == Phase.roomCleared
@@ -2586,38 +2590,38 @@ class _GameScreenState extends State<GameScreen>
                           : '👾$_enemiesLeft',
                       style: const TextStyle(
                           fontWeight: FontWeight.w900,
-                          fontSize: 12,
+                          fontSize: 10,
                           color: Colors.white)),
                   Text('💰${_p.obols}',
                       style: const TextStyle(
                           fontWeight: FontWeight.w900,
-                          fontSize: 12,
-                          color: Color(0xFFFFD45E))),
+                          fontSize: 10,
+                          color: lblColor)),
                   Text('LV${_p.level}',
                       style: const TextStyle(
                           fontWeight: FontWeight.w900,
-                          fontSize: 12,
+                          fontSize: 10,
                           color: Color(0xFF8CC8FF))),
                 ],
               ),
-              const SizedBox(height: 5),
+              const SizedBox(height: 3),
               _bar(_p.hp / _p.maxHp, const Color(0xFFFF5C6C),
-                  'HP ${_p.hp.ceil()}/${_p.maxHp.toInt()}'),
-              const SizedBox(height: 3),
+                  'HP ${_p.hp.ceil()}/${_p.maxHp.toInt()}', h: 11),
+              const SizedBox(height: 2),
               _bar(_p.mp / _p.maxMp, const Color(0xFF3F8BFF),
-                  'MP ${_p.mp.floor()}/${_p.maxMp.toInt()}', h: 12),
-              const SizedBox(height: 3),
-              _bar(_p.xp / _p.xpToNext, const Color(0xFF8CFF98), null, h: 6),
-              const SizedBox(height: 3),
+                  'MP ${_p.mp.floor()}/${_p.maxMp.toInt()}', h: 7),
+              const SizedBox(height: 2),
+              _bar(_p.xp / _p.xpToNext, const Color(0xFF8CFF98), null, h: 4),
+              const SizedBox(height: 2),
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                     '🔫 ${_p.weapon.name}    '
                     '${'💀' * _p.revives.clamp(0, 6).toInt()}',
                     style: const TextStyle(
-                        fontSize: 10,
+                        fontSize: 9,
                         fontWeight: FontWeight.w900,
-                        color: Color(0xFFFFD45E))),
+                        color: lblColor)),
               ),
             ],
           ),
@@ -2626,7 +2630,7 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
-  Widget _bar(double v, Color color, String? label, {double h = 18}) {
+  Widget _bar(double v, Color color, String? label, {double h = 11}) {
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -2634,20 +2638,20 @@ class _GameScreenState extends State<GameScreen>
           height: h,
           decoration: BoxDecoration(
               color: Colors.black38,
-              borderRadius: BorderRadius.circular(10)),
+              borderRadius: BorderRadius.circular(6)),
           child: FractionallySizedBox(
             alignment: Alignment.centerLeft,
             widthFactor: v.clamp(0.0, 1.0).toDouble(),
             child: Container(
               decoration: BoxDecoration(
-                  color: color, borderRadius: BorderRadius.circular(10)),
+                  color: color, borderRadius: BorderRadius.circular(6)),
             ),
           ),
         ),
         if (label != null)
           Text(label,
               style: const TextStyle(
-                  fontSize: 10,
+                  fontSize: 8,
                   fontWeight: FontWeight.bold,
                   color: Colors.white)),
       ],
@@ -3790,8 +3794,8 @@ class WorldPainter extends CustomPainter {
   void _paintMinimap(Canvas canvas, Size size, GameMap m) {
     const mw = 92.0;
     final mh = mw * (m.worldH / m.worldW);
-    final ox = 12.0;
-    final oy = size.height - mh - 14;
+    final ox = size.width - mw - 14;
+    final oy = 14.0;
     final rect = Rect.fromLTWH(ox, oy, mw, mh);
     canvas.drawRRect(
         RRect.fromRectAndRadius(rect, const Radius.circular(6)),
