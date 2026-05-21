@@ -1024,6 +1024,7 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
               button(blessing.label, blessing.color, blessing.onTap),
             ],
           ]),
+          if (_questRow(npc.id, tier) != null) _questRow(npc.id, tier)!,
           if (pendingNote != null)
             Padding(
               padding: const EdgeInsets.only(top: 6),
@@ -1126,6 +1127,113 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
       default:
         return null;
     }
+  }
+
+  // Each NPC's ★★ quest: tracker label, target, and the permanent
+  // reward applied once `questDone` includes their id. Reward effects
+  // are wired in Player ctor / kill loop, so claim here is just bookkeeping.
+  static const Map<String, ({String label, int target, String reward})>
+      _quests = {
+    'smith': (
+      label: 'land lifetime crits',
+      target: 200,
+      reward: '+1 starting damage',
+    ),
+    'hypnos': (
+      label: 'finish runs (win or lose)',
+      target: 8,
+      reward: '+5 starting max HP',
+    ),
+    'achilles': (
+      label: 'defeat bosses',
+      target: 10,
+      reward: '+1 starting Death Defiance',
+    ),
+    'dusa': (
+      label: 'collect nectar bottles',
+      target: 30,
+      reward: '+0.5 starting MP/sec',
+    ),
+    'chef': (
+      label: 'kill grenadiers',
+      target: 40,
+      reward: '5% chance any kill drops nectar',
+    ),
+  };
+
+  Widget? _questRow(String id, int tier) {
+    if (tier < 2) return null;
+    final q = _quests[id];
+    if (q == null) return null;
+    final done = NpcStore.questDone.contains(id);
+    final progress = NpcStore.qp(id);
+    if (done) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text('✓ QUEST CLAIMED · ${q.reward}',
+            style: const TextStyle(
+                color: Color(0xFF8CFF98),
+                fontWeight: FontWeight.w900,
+                fontSize: 10)),
+      );
+    }
+    final ready = progress >= q.target;
+    final clamped = progress.clamp(0, q.target);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(children: [
+        Text('QUEST · ${q.label} · $clamped/${q.target}',
+            style: TextStyle(
+                color: ready
+                    ? const Color(0xFF8CFF98)
+                    : Colors.white70,
+                fontWeight: FontWeight.w900,
+                fontSize: 10)),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: Container(
+            width: 220,
+            height: 5,
+            color: const Color(0xFF1F1D2E),
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: clamped / q.target,
+              child: Container(
+                color:
+                    ready ? const Color(0xFF8CFF98) : const Color(0xFFFFD45E),
+              ),
+            ),
+          ),
+        ),
+        if (ready)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () {
+                NpcStore.questDone.add(id);
+                NpcStore.save();
+                setState(() {});
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8CFF98).withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF8CFF98)),
+                ),
+                child: Text('🎁 CLAIM · ${q.reward}',
+                    style: const TextStyle(
+                        color: Color(0xFF8CFF98),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 11)),
+              ),
+            ),
+          ),
+      ]),
+    );
   }
 
   // Summary line so the player sees what's stacked on the next run.
@@ -2107,12 +2215,18 @@ const List<WeaponDef> kWeapons = [
 class Player {
   Player(this.def)
       : pos = Offset.zero,
-        hp = def.maxHp + MetaStore.lvlOf('hp') * 2,
-        maxHp = def.maxHp + MetaStore.lvlOf('hp') * 2,
+        hp = def.maxHp +
+            MetaStore.lvlOf('hp') * 2 +
+            (NpcStore.questDone.contains('hypnos') ? 5 : 0),
+        maxHp = def.maxHp +
+            MetaStore.lvlOf('hp') * 2 +
+            (NpcStore.questDone.contains('hypnos') ? 5 : 0),
         mp = def.maxMp,
         maxMp = def.maxMp,
         speed = def.speed + MetaStore.lvlOf('spd') * 8,
-        damage = def.damage + MetaStore.lvlOf('dmg') * 0.3,
+        damage = def.damage +
+            MetaStore.lvlOf('dmg') * 0.3 +
+            (NpcStore.questDone.contains('smith') ? 1 : 0),
         fireInterval = def.fireInterval,
         projSpeed = def.projSpeed,
         range = def.range,
@@ -2132,7 +2246,9 @@ class Player {
   double maxHp;
   double mp;
   double maxMp;
-  double mpRegen = 1.0 + MetaStore.lvlOf('mp') * 0.4;
+  double mpRegen = 1.0 +
+      MetaStore.lvlOf('mp') * 0.4 +
+      (NpcStore.questDone.contains('dusa') ? 0.5 : 0);
   double speed;
   double damage;
   double fireInterval;
@@ -2150,7 +2266,9 @@ class Player {
   WeaponDef weapon = kDefaultWeapon;
 
   // Hades-style kit
-  int revives = 1 + MetaStore.lvlOf('rev'); // Death Defiance charges
+  int revives = 1 +
+      MetaStore.lvlOf('rev') +
+      (NpcStore.questDone.contains('achilles') ? 1 : 0);
   double dashTimer = 0;
   double dashCd = (1.5 - MetaStore.lvlOf('dash') * 0.1).clamp(0.4, 5);
   int zeus = 0; // chain-lightning jumps
@@ -2438,6 +2556,11 @@ class NpcStore {
   static int nectar = 0;
   // Whether the smith's per-run service has been used. Cleared at _initRun.
   static bool smithUsedThisRun = false;
+  // Quest tracking (★★ unlocks each NPC's one-time quest).
+  static Map<String, int> questProgress = {};
+  static Set<String> questDone = {};
+  // Lifetime nectar collected — feeds Dusa's quest target.
+  static int lifetimeNectar = 0;
 
   static int affOf(String id) => affinity[id] ?? 0;
   static int tierOf(String id) {
@@ -2452,11 +2575,15 @@ class NpcStore {
     try {
       final p = await SharedPreferences.getInstance();
       nectar = p.getInt('bb_nectar') ?? 0;
+      lifetimeNectar = p.getInt('bb_nectarTotal') ?? 0;
       rescued = (p.getStringList('bb_rescued') ?? const <String>[]).toSet();
       affinity = {};
+      questProgress = {};
       for (final id in _npcIds) {
         affinity[id] = p.getInt('bb_aff_$id') ?? 0;
+        questProgress[id] = p.getInt('bb_qp_$id') ?? 0;
       }
+      questDone = (p.getStringList('bb_qdone') ?? const <String>[]).toSet();
     } catch (_) {}
   }
 
@@ -2464,11 +2591,21 @@ class NpcStore {
     try {
       final p = await SharedPreferences.getInstance();
       await p.setInt('bb_nectar', nectar);
+      await p.setInt('bb_nectarTotal', lifetimeNectar);
       await p.setStringList('bb_rescued', rescued.toList());
       for (final id in _npcIds) {
         await p.setInt('bb_aff_$id', affinity[id] ?? 0);
+        await p.setInt('bb_qp_$id', questProgress[id] ?? 0);
       }
+      await p.setStringList('bb_qdone', questDone.toList());
     } catch (_) {}
+  }
+
+  static int qp(String id) => questProgress[id] ?? 0;
+  static void bumpQuest(String id, int by) {
+    if (questDone.contains(id)) return;
+    questProgress[id] = qp(id) + by;
+    save();
   }
 
   static void gift(String id) {
@@ -2491,6 +2628,7 @@ class GameStats {
   static int totalRuns = 0;
   static int bestCombo = 0;
   static int totalBossKills = 0;
+  static int totalCrits = 0;
   static final Map<int, int> killsByKind = {};
   static final Set<String> achievements = {};
   // dailyBest keyed by YYYYMMDD → best score for that day's seeded run.
@@ -2506,6 +2644,7 @@ class GameStats {
       totalRuns = p.getInt('bb_totalRuns') ?? 0;
       bestCombo = p.getInt('bb_bestCombo') ?? 0;
       totalBossKills = p.getInt('bb_totalBossKills') ?? 0;
+      totalCrits = p.getInt('bb_totalCrits') ?? 0;
       killsByKind.clear();
       for (int k = 0; k < 12; k++) {
         final n = p.getInt('bb_killsK$k') ?? 0;
@@ -2531,6 +2670,7 @@ class GameStats {
       await p.setInt('bb_totalRuns', totalRuns);
       await p.setInt('bb_bestCombo', bestCombo);
       await p.setInt('bb_totalBossKills', totalBossKills);
+      await p.setInt('bb_totalCrits', totalCrits);
       for (final e in killsByKind.entries) {
         await p.setInt('bb_killsK${e.key}', e.value);
       }
@@ -3068,6 +3208,8 @@ class _GameScreenState extends State<GameScreen>
       if (n.life <= 0) return true;
       if ((n.pos - _p.pos).distance < _p.radius + 11) {
         NpcStore.nectar += 1;
+        NpcStore.lifetimeNectar += 1;
+        NpcStore.bumpQuest('dusa', 1);
         NpcStore.save();
         _texts.add(FloatText(_p.pos.translate(0, -22), '🍯 NECTAR',
             const Color(0xFFFFD45E)));
@@ -3532,7 +3674,11 @@ class _GameScreenState extends State<GameScreen>
         // Stats + achievement bookkeeping.
         GameStats.killsByKind.update(e.kind, (n) => n + 1,
             ifAbsent: () => 1);
-        if (e.kind == 3) GameStats.totalBossKills++;
+        if (e.kind == 3) {
+          GameStats.totalBossKills++;
+          NpcStore.bumpQuest('achilles', 1);
+        }
+        if (e.kind == 9) NpcStore.bumpQuest('chef', 1);
         if (_combo > GameStats.bestCombo) GameStats.bestCombo = _combo;
         // Boss kills can drop a healing heart for the player.
         if (e.kind == 3) {
@@ -3545,6 +3691,10 @@ class _GameScreenState extends State<GameScreen>
         }
         if (e.elite &&
             _rng.nextDouble() < 0.45 + Loadout.blessingNectarBonus) {
+          _nectar.add(NectarDrop(e.pos));
+        } else if (NpcStore.questDone.contains('chef') &&
+            _rng.nextDouble() < 0.05) {
+          // Chef's quest reward: small chance per normal kill, always on.
           _nectar.add(NectarDrop(e.pos));
         }
         _checkAchievements();
@@ -3598,9 +3748,12 @@ class _GameScreenState extends State<GameScreen>
     e.hp -= dmg;
     e.flash = 0.1;
     _bursts.add(Burst(e.pos, crit ? 22 : 14));
-    // Crits get a second, larger ring on top of the standard burst so the
-    // hit reads even through crowded combat.
-    if (crit) _bursts.add(Burst(e.pos, 44));
+    if (crit) {
+      // Crits get a wider ring + count toward smith's quest tracker.
+      _bursts.add(Burst(e.pos, 44));
+      GameStats.totalCrits++;
+      NpcStore.bumpQuest('smith', 1);
+    }
     Sfx.play('hit',
         vol: crit ? 0.7 : 0.45,
         pitch: crit ? 1.25 : 1.0,
@@ -4396,6 +4549,7 @@ class _GameScreenState extends State<GameScreen>
     GameStats.recordRunEnd(_wave, _floorIdx + 1, _p.kills, _p.obols);
     _awardShards();
     Loadout.blessingNectarBonus = 0; // chef's buff is per-run
+    NpcStore.bumpQuest('hypnos', 1);
     _phase = Phase.gameOver;
   }
 
@@ -4404,6 +4558,7 @@ class _GameScreenState extends State<GameScreen>
     GameStats.recordRunEnd(_wave, _floorIdx + 1, _p.kills, _p.obols);
     _awardShards();
     Loadout.blessingNectarBonus = 0;
+    NpcStore.bumpQuest('hypnos', 1);
     _phase = Phase.victory;
   }
 
