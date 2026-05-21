@@ -16,6 +16,7 @@ Future<void> main() async {
       [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await MetaStore.load();
   await GameStats.load();
+  await NpcStore.load();
   await Settings.load();
   await Sfx.init();
   runApp(const BuffBattleApp());
@@ -221,6 +222,8 @@ class Loadout {
   // If set, the next run uses this RNG seed and records its score under
   // `dailyKey()` so each day's seed has a personal best.
   static int? dailySeed;
+  // Smith's blessing — extra damage applied at run start, consumed on use.
+  static int blessingDmg = 0;
   static String? dailyKey; // YYYYMMDD format
 
   static String todayKey() {
@@ -873,6 +876,7 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
       ..clear()
       ..addAll([
         HomeNpc(
+          id: 'hypnos',
           pos: Offset(ccx * cell - 80, 7.5 * cell),
           name: 'HYPNOS',
           icon: '😴',
@@ -880,6 +884,7 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
           lines: _hypnosLines(),
         ),
         HomeNpc(
+          id: 'dusa',
           pos: Offset((rcx - 1.4) * cell, 9 * cell),
           name: 'DUSA',
           icon: '👁',
@@ -893,6 +898,7 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
           ],
         ),
         HomeNpc(
+          id: 'achilles',
           pos: Offset((lcx + 1.4) * cell, 9 * cell),
           name: 'ACHILLES',
           icon: '🛡',
@@ -905,12 +911,122 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
             "keep your guard up, lad. the dungeon teaches the unprepared.",
           ],
         ),
+        // Rescued NPCs: only appear at home after the player has freed them
+        // from a captive event during a run.
+        if (NpcStore.rescued.contains('smith'))
+          HomeNpc(
+            id: 'smith',
+            pos: Offset(rcx * cell + 70, 7.5 * cell),
+            name: 'THE SMITH',
+            icon: '🔨',
+            color: const Color(0xFFFFB347),
+            lines: const [
+              "set me free, you did. won't forget it.",
+              "got nectar? i'll bless your edge for the next run.",
+              "the hammer never lies. your blade is sharper than last week.",
+              "ask, and i'll work the steel. that's the deal.",
+            ],
+          ),
       ]);
     for (final n in _npcs) {
       n.lineIdx = _rng.nextInt(n.lines.length);
     }
 
     _ready = true;
+  }
+
+  // Bottom-center stack of NPC actions: appears while the player is standing
+  // next to an NPC. Each button is enabled only if its preconditions hold.
+  Widget _npcActionPanel() {
+    final npc = _talking!;
+    final tier = NpcStore.tierOf(npc.id);
+    final hasNectar = NpcStore.nectar > 0;
+    final canBless = npc.id == 'smith' && tier >= 1 && hasNectar;
+
+    Widget button(String label, Color color, VoidCallback? onTap) {
+      final enabled = onTap != null;
+      return InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: enabled
+                ? color.withValues(alpha: 0.18)
+                : Colors.white12,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: enabled ? color : Colors.white24, width: 1.4),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  color: enabled ? color : Colors.white38,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                  letterSpacing: 1)),
+        ),
+      );
+    }
+
+    return Positioned(
+      bottom: 64,
+      left: 0,
+      right: 0,
+      child: Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(
+              '${npc.name} · friendship ${'★' * tier}${'☆' * (3 - tier)} (${NpcStore.affOf(npc.id)})',
+              style: TextStyle(
+                  color: npc.color,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 11,
+                  letterSpacing: 1.6)),
+          const SizedBox(height: 6),
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            button(
+              hasNectar
+                  ? '🍯 GIFT NECTAR'
+                  : '🍯 NO NECTAR — DROPS FROM ELITES',
+              const Color(0xFFFFD45E),
+              hasNectar
+                  ? () {
+                      NpcStore.gift(npc.id);
+                      // Switch line so the NPC reacts to the gift.
+                      npc.lineIdx = (npc.lineIdx + 1) % npc.lines.length;
+                      setState(() {});
+                    }
+                  : null,
+            ),
+            if (npc.id == 'smith') ...[
+              const SizedBox(width: 10),
+              button(
+                  canBless
+                      ? '🔨 BLESS WEAPON +1 DMG (1🍯)'
+                      : (tier >= 1
+                          ? '🔨 NEED NECTAR'
+                          : '🔨 LOCKED — GIFT TO REACH ★'),
+                  const Color(0xFFFFB347),
+                  canBless
+                      ? () {
+                          NpcStore.nectar -= 1;
+                          NpcStore.save();
+                          Loadout.blessingDmg += 1;
+                          setState(() {});
+                        }
+                      : null),
+            ],
+          ]),
+          if (npc.id == 'smith' && Loadout.blessingDmg > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('next run: +${Loadout.blessingDmg} dmg blessed',
+                  style: const TextStyle(
+                      color: Color(0xFFFFB347), fontSize: 10)),
+            ),
+        ]),
+      ),
+    );
   }
 
   // The greeter's lines fold in the player's lifetime run count so each
@@ -1151,12 +1267,21 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
               Positioned(
                 top: 14,
                 right: 16,
-                child: Text('🔷 ${MetaStore.shards}',
-                    style: const TextStyle(
-                        color: Color(0xFF8CC8FF),
-                        fontWeight: FontWeight.w900,
-                        fontSize: 14)),
+                child: Row(children: [
+                  Text('🍯 ${NpcStore.nectar}',
+                      style: const TextStyle(
+                          color: Color(0xFFFFD45E),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14)),
+                  const SizedBox(width: 12),
+                  Text('🔷 ${MetaStore.shards}',
+                      style: const TextStyle(
+                          color: Color(0xFF8CC8FF),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14)),
+                ]),
               ),
+              if (_talking != null) _npcActionPanel(),
               Positioned(
                 bottom: 16,
                 right: 16,
@@ -2034,6 +2159,21 @@ class Heart {
   double bob = 0;
 }
 
+class NectarDrop {
+  NectarDrop(this.pos);
+  Offset pos;
+  double life = 16.0;
+  double bob = 0;
+}
+
+class Captive {
+  Captive(this.pos, this.npcId);
+  Offset pos;
+  String npcId;
+  double bob = 0;
+  bool freed = false;
+}
+
 class Toast {
   Toast(this.title, this.subtitle, [this.color = const Color(0xFFFFD45E)]);
   final String title;
@@ -2168,6 +2308,65 @@ const List<Achievement> kAchievements = [
   Achievement('shielded_50', 'CAN OPENER', 'kill 50 shielded brutes'),
 ];
 
+/// Per-NPC persistent state: affinity earned through gifts, who's been
+/// rescued from the dungeon, and the player's stash of NECTAR (the gift
+/// currency). Loaded once at boot, written through after every mutation.
+class NpcStore {
+  static const _npcIds = ['hypnos', 'achilles', 'dusa', 'smith'];
+
+  // ids that the player has freed during runs; they appear in home after.
+  static Set<String> rescued = {};
+  // affinity[id] starts at 0; each gift adds 1.
+  static Map<String, int> affinity = {};
+  // gift currency that drops from elites, bosses, and rare rooms.
+  static int nectar = 0;
+  // Whether the smith's per-run service has been used. Cleared at _initRun.
+  static bool smithUsedThisRun = false;
+
+  static int affOf(String id) => affinity[id] ?? 0;
+  static int tierOf(String id) {
+    final a = affOf(id);
+    if (a >= 6) return 3;
+    if (a >= 3) return 2;
+    if (a >= 1) return 1;
+    return 0;
+  }
+
+  static Future<void> load() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      nectar = p.getInt('bb_nectar') ?? 0;
+      rescued = (p.getStringList('bb_rescued') ?? const <String>[]).toSet();
+      affinity = {};
+      for (final id in _npcIds) {
+        affinity[id] = p.getInt('bb_aff_$id') ?? 0;
+      }
+    } catch (_) {}
+  }
+
+  static Future<void> save() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setInt('bb_nectar', nectar);
+      await p.setStringList('bb_rescued', rescued.toList());
+      for (final id in _npcIds) {
+        await p.setInt('bb_aff_$id', affinity[id] ?? 0);
+      }
+    } catch (_) {}
+  }
+
+  static void gift(String id) {
+    if (nectar <= 0) return;
+    nectar -= 1;
+    affinity[id] = affOf(id) + 1;
+    save();
+  }
+
+  static void rescue(String id) {
+    if (rescued.add(id)) save();
+  }
+}
+
 class GameStats {
   static int bestWave = 0;
   static int bestFloor = 0;
@@ -2282,6 +2481,8 @@ class _GameScreenState extends State<GameScreen>
   final List<Grenade> _grenades = [];
   final List<Orb> _orbs = [];
   final List<Heart> _hearts = [];
+  final List<NectarDrop> _nectar = [];
+  final List<Captive> _captives = [];
   final List<Toast> _toasts = [];
   final List<Burst> _bursts = [];
   final List<FloatText> _texts = [];
@@ -2373,6 +2574,8 @@ class _GameScreenState extends State<GameScreen>
     _grenades.clear();
     _orbs.clear();
     _hearts.clear();
+    _nectar.clear();
+    _captives.clear();
     _toasts.clear();
     _bursts.clear();
     _texts.clear();
@@ -2448,6 +2651,26 @@ class _GameScreenState extends State<GameScreen>
             Offset(0, fromTop ? 300 : -300), 2.4 + _rng.nextDouble()));
       }
     }
+
+    // Rare rescue event: tucked-away captive in a far room. Each unreached
+    // NPC has a chance to seed at most once per run; floors gate eligibility.
+    if (!_bossWave && _floorIdx >= 1) {
+      final candidates = <String>[];
+      if (!NpcStore.rescued.contains('smith')) candidates.add('smith');
+      for (final id in candidates) {
+        if (_rng.nextDouble() < 0.06 + _floorIdx * 0.025) {
+          // Place in a back room, away from the player's entry corner.
+          final back = _cornerCell(_exitCorner, _floorBounds()!);
+          final cell = _map.cell;
+          final pos = Offset((back.$1 + 0.5) * cell, (back.$2 + 0.5) * cell);
+          _map.clearDisk(pos.dx, pos.dy, 2.0);
+          _captives.add(Captive(pos, id));
+          _texts.add(FloatText(pos.translate(0, -32),
+              'CAPTIVE — clear the room', const Color(0xFFFFD45E)));
+          break;
+        }
+      }
+    }
   }
 
   void _initRun() {
@@ -2458,9 +2681,14 @@ class _GameScreenState extends State<GameScreen>
     }
     _p = Player(widget.def);
     Loadout.keepsake?.apply(_p);
+    if (Loadout.blessingDmg > 0) {
+      _p.damage += Loadout.blessingDmg;
+      Loadout.blessingDmg = 0; // consumed at the start of the run
+    }
     _wave = 1;
     _entryCorner = 2 + _rng.nextInt(2); // either lower-left or lower-right
     _lastIntroFloor = -1; // force the F1 banner on the first room of a run
+    NpcStore.smithUsedThisRun = false;
     _shake = 0;
     _combo = 0;
     _comboT = 0;
@@ -2680,6 +2908,42 @@ class _GameScreenState extends State<GameScreen>
       }
       return false;
     });
+
+    // Nectar bottles: magnet pull + pickup adds to the persistent gift stash.
+    for (final n in _nectar) {
+      n.life -= dt;
+      n.bob += dt;
+      final dir = _p.pos - n.pos;
+      final d = dir.distance;
+      if (d < 170 && d > 0.01) n.pos += dir / d * 220 * dt;
+    }
+    _nectar.removeWhere((n) {
+      if (n.life <= 0) return true;
+      if ((n.pos - _p.pos).distance < _p.radius + 11) {
+        NpcStore.nectar += 1;
+        NpcStore.save();
+        _texts.add(FloatText(_p.pos.translate(0, -22), '🍯 NECTAR',
+            const Color(0xFFFFD45E)));
+        Sfx.play('pickup', vol: 0.7, pitch: 1.35);
+        return true;
+      }
+      return false;
+    });
+
+    // Captive NPCs: walk over them after the room is clear to free them.
+    for (final c in _captives) {
+      c.bob += dt;
+      if (c.freed) continue;
+      if ((c.pos - _p.pos).distance < _p.radius + 22 &&
+          _enemies.isEmpty) {
+        c.freed = true;
+        NpcStore.rescue(c.npcId);
+        Sfx.play('pickup', vol: 0.95, pitch: 1.0);
+        _shake = max(_shake, 4.0);
+        _toasts.add(Toast('★ FREED THE ${c.npcId.toUpperCase()}',
+            'they are heading to your home', const Color(0xFFFFD45E)));
+      }
+    }
 
     if (_toasts.isNotEmpty) {
       for (final t in _toasts) {
@@ -3111,8 +3375,14 @@ class _GameScreenState extends State<GameScreen>
         // Boss kills can drop a healing heart for the player.
         if (e.kind == 3) {
           _hearts.add(Heart(e.pos));
+          // Bosses always drop a nectar bottle so each clear is a small
+          // gift-shop run for the home NPCs.
+          _nectar.add(NectarDrop(e.pos.translate(20, 0)));
         } else if (e.elite && _rng.nextDouble() < 0.18) {
           _hearts.add(Heart(e.pos));
+        }
+        if (e.elite && _rng.nextDouble() < 0.45) {
+          _nectar.add(NectarDrop(e.pos));
         }
         _checkAchievements();
         return true;
@@ -4101,6 +4371,8 @@ class _GameScreenState extends State<GameScreen>
                       bolts: _bolts,
                       ebolts: _ebolts,
                       grenades: _grenades,
+                      nectar: _nectar,
+                      captives: _captives,
                       orbs: _orbs,
                       hearts: _hearts,
                       bursts: _bursts,
@@ -5223,12 +5495,14 @@ void _drawProp(Canvas canvas, Offset c, double s, int kind, FloorDef f) {
 
 class HomeNpc {
   HomeNpc({
+    required this.id,
     required this.pos,
     required this.name,
     required this.icon,
     required this.color,
     required this.lines,
   });
+  final String id;
   final Offset pos;
   final String name;
   final String icon;
@@ -5420,6 +5694,8 @@ class WorldPainter extends CustomPainter {
     required this.grenades,
     this.homeNpcs = const <HomeNpc>[],
     this.talkingNpc,
+    this.nectar = const <NectarDrop>[],
+    this.captives = const <Captive>[],
     required this.orbs,
     required this.hearts,
     required this.bursts,
@@ -5450,6 +5726,8 @@ class WorldPainter extends CustomPainter {
   final List<Grenade> grenades;
   final List<HomeNpc> homeNpcs;
   final HomeNpc? talkingNpc;
+  final List<NectarDrop> nectar;
+  final List<Captive> captives;
   final List<Orb> orbs;
   final List<Heart> hearts;
   final List<Burst> bursts;
@@ -6181,6 +6459,89 @@ class WorldPainter extends CustomPainter {
                 path,
                 Paint()
                   ..color = const Color(0xFFFF6B79).withValues(alpha: fade));
+          }));
+    }
+    // Nectar bottles: amber droplet with a pulsing aura.
+    for (final n in nectar) {
+      final pos = n.pos.translate(0, -3 + sin(n.bob * 4.6) * 2);
+      final fade = n.life < 1.0 ? n.life.clamp(0.0, 1.0).toDouble() : 1.0;
+      add(dep(pos), () => _projAt(canvas, pos, 0, () {
+            canvas.drawCircle(
+                pos,
+                12,
+                Paint()
+                  ..color =
+                      const Color(0xFFFFD45E).withValues(alpha: 0.22 * fade));
+            // Bottle: rounded body + gold cap.
+            canvas.drawRRect(
+                RRect.fromRectAndRadius(
+                    Rect.fromCenter(
+                        center: pos.translate(0, 1),
+                        width: 8.5,
+                        height: 12),
+                    const Radius.circular(3)),
+                Paint()
+                  ..color =
+                      const Color(0xFFFFB347).withValues(alpha: fade));
+            canvas.drawRect(
+                Rect.fromCenter(
+                    center: pos.translate(0, -5), width: 5.5, height: 4),
+                Paint()
+                  ..color =
+                      const Color(0xFFFFD45E).withValues(alpha: fade));
+          }));
+    }
+    // Captives: faded ghostly NPC body with shimmering chains until freed.
+    for (final c in captives) {
+      if (c.freed) continue;
+      final pos = c.pos.translate(0, sin(c.bob * 2.2) * 1.2);
+      add(dep(pos), () => _projAt(canvas, pos, 0, () {
+            // Dim halo so the player sees them from across the room.
+            final pulse = 0.5 + 0.5 * sin(c.bob * 4);
+            canvas.drawCircle(
+                pos,
+                36,
+                Paint()
+                  ..color = const Color(0xFFFFD45E)
+                      .withValues(alpha: 0.10 + 0.10 * pulse));
+            canvas.drawCircle(
+                pos,
+                20,
+                Paint()
+                  ..shader = RadialGradient(
+                    colors: [
+                      const Color(0xFF8CC8FF).withValues(alpha: 0.55),
+                      const Color(0xFF4A4F6B).withValues(alpha: 0.85),
+                    ],
+                  ).createShader(Rect.fromCircle(center: pos, radius: 20)));
+            canvas.drawCircle(
+                pos,
+                20,
+                Paint()
+                  ..color = const Color(0xFFFFD45E)
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = 2);
+            // "?" mark and a chain bracket below to read as "captive".
+            final tp = TextPainter(
+              text: const TextSpan(
+                  text: '?',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'RobotoMono')),
+              textDirection: TextDirection.ltr,
+            )..layout();
+            tp.paint(canvas, pos - Offset(tp.width / 2, tp.height / 2));
+            final chain = Paint()
+              ..color = const Color(0xFF7E8AAB)
+              ..strokeWidth = 2;
+            canvas.drawLine(pos.translate(-14, 22), pos.translate(14, 22),
+                chain);
+            canvas.drawLine(pos.translate(-8, 18), pos.translate(-8, 26),
+                chain);
+            canvas.drawLine(
+                pos.translate(8, 18), pos.translate(8, 26), chain);
           }));
     }
 
