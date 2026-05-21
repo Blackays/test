@@ -754,6 +754,8 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
   Player? _p;
   final List<Door> _altars = [];
   final Map<Door, double> _cool = {};
+  final List<HomeNpc> _npcs = [];
+  HomeNpc? _talking; // NPC the player is currently standing next to
   Offset _moveDir = Offset.zero;
   Offset _facing = const Offset(1, 0);
   double _elapsed = 0;
@@ -782,71 +784,155 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
   void _build() {
     WorldPainter.resetCaches();
     const cell = 60.0;
-    const cols = 18, rows = 12;
+    const cols = 30, rows = 18;
     final m = GameMap(cols, rows, cell);
-    for (int c = 2; c < cols - 2; c++) {
-      for (int r = 2; r < rows - 2; r++) {
-        m.set(c, r, 1);
+
+    // Carve three connected chambers separated by interior walls:
+    //   LEFT (the Mirror) ── CORRIDOR ── CENTER (entrance + portal)
+    //                                       ── CORRIDOR ── RIGHT (vault)
+    void carve(int c0, int c1, int r0, int r1) {
+      for (int c = c0; c <= c1; c++) {
+        for (int r = r0; r <= r1; r++) {
+          m.set(c, r, 1);
+        }
       }
     }
-    m.rooms.add(Rect.fromLTWH(
-        2, 2, (cols - 4).toDouble(), (rows - 4).toDouble()));
+
+    carve(2, 9, 3, 14); // LEFT chamber
+    carve(12, 18, 3, 14); // CENTER hall
+    carve(21, 27, 3, 14); // RIGHT vault
+    carve(9, 12, 7, 10); // left ↔ center corridor (4 tiles wide, 4 tall)
+    carve(18, 21, 7, 10); // center ↔ right corridor
+
+    m.rooms
+      ..add(const Rect.fromLTWH(2, 3, 8, 12))
+      ..add(const Rect.fromLTWH(12, 3, 7, 12))
+      ..add(const Rect.fromLTWH(21, 3, 7, 12));
     _map = m;
 
     final player = Player(kHeroes.first);
-    player.pos = m.roomCenter(0);
-    // In the hub you're not fighting — let the player stride between altars
-    // instead of plodding at combat speed.
+    // Spawn in the doorway of the center hall so the first thing the
+    // player sees is the BEGIN RUN portal at the bottom of the room.
+    player.pos = Offset(15.5 * cell, 11.5 * cell);
     player.speed = 300;
     _p = player;
 
-    final w = m.worldW, h = m.worldH;
-    final cy = h / 2, cx = w / 2;
+    // Altars spread across the three chambers + corridor approaches.
+    const lcx = 5.5; // left chamber center column
+    const ccx = 15.5; // center hall center column
+    const rcx = 24.0; // right vault center column
+
     _altars
       ..clear()
       ..addAll([
-        // Top wall — read-only / quick-access altars.
+        // LEFT chamber — Mirror of Gains (back wall), Bestiary (front).
         Door(
-          Offset(w * 0.30, h * 0.22),
+          Offset(lcx * cell, 4.5 * cell),
+          DoorDef('🪞', 'MIRROR OF GAINS', 'permanent stat upgrades',
+              DoorKind.shop, (_) {}),
+        ),
+        Door(
+          Offset(lcx * cell, 13.2 * cell),
           DoorDef(
               '📖', 'BESTIARY', "foes you've faced", DoorKind.shrine, (_) {}),
         ),
+        // CENTER hall — Settings (top) and BEGIN RUN (the way out).
         Door(
-          Offset(cx, h * 0.20),
+          Offset(ccx * cell, 4.5 * cell),
           DoorDef('⚙', 'SETTINGS', 'audio · shake · haptics',
               DoorKind.shrine, (_) {}),
         ),
         Door(
-          Offset(w * 0.70, h * 0.22),
+          Offset(ccx * cell, 13.2 * cell),
+          DoorDef('⚔', 'BEGIN RUN', 'fight through the dungeon',
+              DoorKind.reward, (_) {}),
+        ),
+        // RIGHT vault — Achievements (back) + Daily Challenge (front).
+        Door(
+          Offset(rcx * cell, 4.5 * cell),
           DoorDef(
               '🏆',
               'ACHIEVEMENTS',
               '${GameStats.achievements.length}/${kAchievements.length}',
               DoorKind.shrine, (_) {}),
         ),
-        // Left / right walls — heavier altars.
         Door(
-          Offset(w * 0.18, cy + 30),
-          DoorDef('🪞', 'MIRROR OF GAINS', 'permanent stat upgrades',
-              DoorKind.shop, (_) {}),
-        ),
-        Door(
-          Offset(w * 0.82, cy + 30),
+          Offset(rcx * cell, 13.2 * cell),
           DoorDef('🌞', 'DAILY CHALLENGE',
               "today's seeded dungeon", DoorKind.shrine, (_) {}),
-        ),
-        // Bottom wall — the exit out into the run.
-        Door(
-          Offset(cx, h * 0.82),
-          DoorDef('⚔', 'BEGIN RUN', 'fight through the dungeon',
-              DoorKind.reward, (_) {}),
         ),
       ]);
     for (final a in _altars) {
       _cool[a] = 0;
     }
+
+    // NPCs that walk you through the home: a greeter who comments on each
+    // return, a polishing trader by the daily altar, and a mentor by the
+    // mirror who riffs on training. Names are Hades-flavored.
+    _npcs
+      ..clear()
+      ..addAll([
+        HomeNpc(
+          pos: Offset(ccx * cell - 80, 7.5 * cell),
+          name: 'HYPNOS',
+          icon: '😴',
+          color: const Color(0xFFFFD45E),
+          lines: _hypnosLines(),
+        ),
+        HomeNpc(
+          pos: Offset((rcx - 1.4) * cell, 9 * cell),
+          name: 'DUSA',
+          icon: '👁',
+          color: const Color(0xFF9B5CFF),
+          lines: const [
+            "oh! you startled me. don't, um — look too directly.",
+            "i keep the floors clean. it's the least i can do.",
+            "the lord says you're back. that's a 'good thing', isn't it?",
+            "today's challenge is laid out. don't trip on the rug.",
+            "be careful out there, my, um — yes. you.",
+          ],
+        ),
+        HomeNpc(
+          pos: Offset((lcx + 1.4) * cell, 9 * cell),
+          name: 'ACHILLES',
+          icon: '🛡',
+          color: const Color(0xFF8CC8FF),
+          lines: const [
+            "strength is not luck. it is a habit.",
+            "the mirror rewards the disciplined. spend wisely.",
+            "i have seen many fall to the same trap twice.",
+            "next time, dash THROUGH the attack. not away from it.",
+            "keep your guard up, lad. the dungeon teaches the unprepared.",
+          ],
+        ),
+      ]);
+    for (final n in _npcs) {
+      n.lineIdx = _rng.nextInt(n.lines.length);
+    }
+
     _ready = true;
   }
+
+  // The greeter's lines fold in the player's lifetime run count so each
+  // return feels like Hypnos is actually keeping score.
+  List<String> _hypnosLines() {
+    final n = GameStats.totalRuns;
+    return [
+      n == 0
+          ? "first time in the house? mind the rug."
+          : "back again? that makes $n attempt${n == 1 ? '' : 's'}.",
+      "you smell like ash. and floor 1, mostly.",
+      "the portal at the bottom of the hall — that's the one.",
+      "don't forget the mirror. permanent gains compound, you know.",
+      "i keep tallies. you're welcome.",
+      if (GameStats.bestFloor >= 3)
+        "your best is floor ${GameStats.bestFloor}. impressive. for now.",
+      if (GameStats.totalBossKills > 0)
+        "${GameStats.totalBossKills} boss kill${GameStats.totalBossKills == 1 ? '' : 's'}. not bad. not great.",
+    ];
+  }
+
+  static final Random _rng = Random();
 
   void _onTick(Duration elapsed) {
     if (!_ready || _map == null || _p == null) {
@@ -882,6 +968,21 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
       _cool[closest] = 1.6;
       _activate(closest);
     }
+
+    // NPC dialog: pick a fresh line whenever the player enters a chat range
+    // they weren't in last frame, so they can step away and back to cycle.
+    HomeNpc? talking;
+    for (final n in _npcs) {
+      n.bob += dt;
+      final inRange = (n.pos - p.pos).distance < 90;
+      if (inRange && !n.wasNear) {
+        n.lineIdx = (n.lineIdx + 1) % n.lines.length;
+      }
+      n.wasNear = inRange;
+      if (inRange) talking = n;
+    }
+    _talking = talking;
+
     setState(() {});
   }
 
@@ -996,6 +1097,8 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
                       bolts: const <Bolt>[],
                       ebolts: const <EBolt>[],
                       grenades: const <Grenade>[],
+                      homeNpcs: _npcs,
+                      talkingNpc: _talking,
                       orbs: const <Orb>[],
                       hearts: const <Heart>[],
                       bursts: const <Burst>[],
@@ -5118,6 +5221,24 @@ void _drawProp(Canvas canvas, Offset c, double s, int kind, FloorDef f) {
   }
 }
 
+class HomeNpc {
+  HomeNpc({
+    required this.pos,
+    required this.name,
+    required this.icon,
+    required this.color,
+    required this.lines,
+  });
+  final Offset pos;
+  final String name;
+  final String icon;
+  final Color color;
+  final List<String> lines;
+  int lineIdx = 0;
+  bool wasNear = false; // tracks proximity edge so we rotate lines on re-entry
+  double bob = 0; // idle animation phase
+}
+
 class HeroPreviewPainter extends CustomPainter {
   HeroPreviewPainter({required this.def});
   final HeroDef def;
@@ -5297,6 +5418,8 @@ class WorldPainter extends CustomPainter {
     required this.bolts,
     required this.ebolts,
     required this.grenades,
+    this.homeNpcs = const <HomeNpc>[],
+    this.talkingNpc,
     required this.orbs,
     required this.hearts,
     required this.bursts,
@@ -5325,6 +5448,8 @@ class WorldPainter extends CustomPainter {
   final List<Bolt> bolts;
   final List<EBolt> ebolts;
   final List<Grenade> grenades;
+  final List<HomeNpc> homeNpcs;
+  final HomeNpc? talkingNpc;
   final List<Orb> orbs;
   final List<Heart> hearts;
   final List<Burst> bursts;
@@ -5388,6 +5513,7 @@ class WorldPainter extends CustomPainter {
     // Doors render last (in world space) so they always sit above tiles,
     // walls, entities, and bursts — and their label is never occluded.
     _paintDoorsOverlay(canvas);
+    _paintNpcBubble(canvas);
 
     canvas.restore();
 
@@ -5635,6 +5761,73 @@ class WorldPainter extends CustomPainter {
       canvas.drawCircle(e.pos, 4.5, core);
       canvas.restore();
     }
+  }
+
+  // Speech bubble over the talking NPC. Drawn in world space so the camera
+  // shake / iso projection moves it with the head, but on top of the
+  // doors-overlay layer so it's never occluded.
+  void _paintNpcBubble(Canvas canvas) {
+    final n = talkingNpc;
+    if (n == null) return;
+    final line = n.lines[n.lineIdx.clamp(0, n.lines.length - 1)];
+    final tp = TextPainter(
+      text: TextSpan(
+          text: line,
+          style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              height: 1.35,
+              fontFamily: 'RobotoMono',
+              fontFamilyFallback: ['NotoEmoji'])),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
+    )..layout(maxWidth: 220);
+    final nm = TextPainter(
+      text: TextSpan(
+          text: n.name,
+          style: TextStyle(
+              color: n.color,
+              fontWeight: FontWeight.w900,
+              fontSize: 10,
+              letterSpacing: 2,
+              fontFamily: 'RobotoMono')),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final w = max(tp.width, nm.width) + 24;
+    final h = tp.height + nm.height + 16;
+    _projAt(canvas, n.pos, 0, () {
+      final anchor = n.pos.translate(0, -52);
+      final rect = Rect.fromCenter(center: anchor, width: w, height: h);
+      final rrect =
+          RRect.fromRectAndRadius(rect, const Radius.circular(8));
+      // Drop shadow plate.
+      canvas.drawRRect(rrect.shift(const Offset(0, 3)),
+          Paint()..color = const Color(0xAA000000));
+      canvas.drawRRect(
+          rrect, Paint()..color = const Color(0xEE12101C));
+      canvas.drawRRect(
+          rrect,
+          Paint()
+            ..color = n.color
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.6);
+      // Tail pointing down to the NPC's head.
+      final tail = Path()
+        ..moveTo(anchor.dx - 8, rect.bottom)
+        ..lineTo(anchor.dx, rect.bottom + 10)
+        ..lineTo(anchor.dx + 8, rect.bottom)
+        ..close();
+      canvas.drawPath(tail, Paint()..color = const Color(0xEE12101C));
+      canvas.drawPath(
+          tail,
+          Paint()
+            ..color = n.color
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.6);
+      nm.paint(canvas, Offset(rect.left + 12, rect.top + 6));
+      tp.paint(canvas, Offset(rect.center.dx - tp.width / 2,
+          rect.top + 6 + nm.height + 4));
+    });
   }
 
   void _paintDoorsOverlay(Canvas canvas) {
@@ -6195,6 +6388,63 @@ class WorldPainter extends CustomPainter {
             t: time, moving: moving, look: facing);
       });
     });
+    // Home-room NPCs: drawn as colored disc + emoji face, depth-sorted so
+    // they stand behind / in front of the player consistently.
+    for (final n in homeNpcs) {
+      add(dep(n.pos), () => _projAt(canvas, n.pos, 0, () {
+            const r = 22.0;
+            final bob = sin(n.bob * 2.6) * 1.5;
+            final c = n.pos.translate(0, bob);
+            // shadow
+            canvas.drawOval(
+                Rect.fromCenter(
+                    center: c.translate(0, r * 0.95),
+                    width: r * 1.7,
+                    height: r * 0.5),
+                Paint()..color = const Color(0x44000000));
+            canvas.drawCircle(
+                c,
+                r,
+                Paint()
+                  ..shader = RadialGradient(
+                    center: const Alignment(-0.4, -0.5),
+                    colors: [_lit(n.color, 0.4), n.color, _shd(n.color, 0.4)],
+                    stops: const [0.0, 0.55, 1.0],
+                  ).createShader(Rect.fromCircle(center: c, radius: r)));
+            canvas.drawCircle(
+                c,
+                r,
+                Paint()
+                  ..color = _shd(n.color, 0.5)
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = 2);
+            // Emoji face centered on the body.
+            final tp = TextPainter(
+              text: TextSpan(
+                  text: n.icon,
+                  style:
+                      const TextStyle(fontSize: 22, fontFamily: 'NotoEmoji')),
+              textDirection: TextDirection.ltr,
+            )..layout();
+            tp.paint(canvas, c - Offset(tp.width / 2, tp.height / 2));
+            // Name tag below the body.
+            final nt = TextPainter(
+              text: TextSpan(
+                  text: n.name,
+                  style: TextStyle(
+                      color: n.color,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 10,
+                      letterSpacing: 1.6,
+                      fontFamily: 'RobotoMono')),
+              textDirection: TextDirection.ltr,
+            )..layout();
+            nt.paint(
+                canvas,
+                Offset(c.dx - nt.width / 2,
+                    c.dy + r + 4));
+          }));
+    }
 
     for (final tx in texts) {
       add(1e18, () => _projAt(canvas, tx.pos, 0, () {
