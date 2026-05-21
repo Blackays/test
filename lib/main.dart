@@ -214,6 +214,66 @@ final List<Keepsake> kKeepsakes = [
       (p) => p.lifesteal = (p.lifesteal + 0.1)),
 ];
 
+/// Unique keepsakes gifted by each NPC at ★★★ friendship. They append to
+/// kKeepsakes in `availableKeepsakes()` whenever the NPC's friendship is
+/// max so the Keepsake Stand only lists what the player has actually earned.
+class NpcKeepsake {
+  const NpcKeepsake(this.npcId, this.keepsake);
+  final String npcId;
+  final Keepsake keepsake;
+}
+
+final List<NpcKeepsake> kNpcKeepsakes = [
+  NpcKeepsake('hypnos', Keepsake('PILLOW OF NIGHT',
+      '+5 HP & +0.4 HP/sec, but -0.5 damage', (p) {
+    p.maxHp += 5;
+    p.hp += 5;
+    p.regen += 0.4;
+    p.damage = (p.damage - 0.5).clamp(0.1, 999).toDouble();
+  })),
+  NpcKeepsake('achilles', Keepsake('BRONZE GUARD',
+      '+2 Death Defiance, but -8 max HP', (p) {
+    p.revives += 2;
+    p.maxHp = (p.maxHp - 8).clamp(1, 999).toDouble();
+    p.hp = p.hp.clamp(1, p.maxHp).toDouble();
+  })),
+  NpcKeepsake('dusa', Keepsake('MIRROR SHARD',
+      '+0.25 vision & +0.6 MP/sec', (p) {
+    p.vision = (p.vision + 0.25).clamp(1.0, 2.8).toDouble();
+    p.mpRegen += 0.6;
+  })),
+  NpcKeepsake('smith', Keepsake('FORGE STAMP',
+      '+1.5 damage but +15% fire interval', (p) {
+    p.damage += 1.5;
+    p.fireInterval *= 1.15;
+  })),
+  NpcKeepsake('chef', Keepsake('WARM LOAF',
+      '+25% nectar drops & +6 max HP', (p) {
+    Loadout.blessingNectarBonus += 0.25;
+    p.maxHp += 6;
+    p.hp += 6;
+  })),
+  NpcKeepsake('scribe', Keepsake('INKWELL',
+      '+8% crit & +1 projectile', (p) {
+    p.critChance += 0.08;
+    p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt();
+  })),
+  NpcKeepsake('apothecary', Keepsake('HERB POUCH',
+      '+0.8 HP/sec & +0.4 MP/sec', (p) {
+    p.regen += 0.8;
+    p.mpRegen += 0.4;
+  })),
+];
+
+// Base keepsakes + every NPC-keepsake whose donor is at ★★★ friendship.
+List<Keepsake> availableKeepsakes() {
+  final list = List<Keepsake>.from(kKeepsakes);
+  for (final nk in kNpcKeepsakes) {
+    if (NpcStore.tierOf(nk.npcId) >= 3) list.add(nk.keepsake);
+  }
+  return list;
+}
+
 class Loadout {
   static Keepsake? keepsake;
   static int heat = 0; // Pact of Punishment-style difficulty
@@ -222,6 +282,8 @@ class Loadout {
   // If set, the next run uses this RNG seed and records its score under
   // `dailyKey()` so each day's seed has a personal best.
   static int? dailySeed;
+  // Pre-run picks set at the home stands. Null = use the hero default.
+  static WeaponDef? startingWeapon;
   // NPC blessings — set in the home, applied + consumed at run start.
   static int blessingDmg = 0; // Smith: +damage
   static int blessingHp = 0; // Hypnos: +max HP
@@ -845,10 +907,22 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
           DoorDef(
               '📖', 'BESTIARY', "foes you've faced", DoorKind.shrine, (_) {}),
         ),
-        // CENTER hall — Settings (top) and BEGIN RUN (the way out).
+        // CENTER hall — Settings (top) and BEGIN RUN (the way out), plus
+        // the two pre-run stands (Arsenal + Keepsake) on either side of
+        // the portal so the player can tinker without leaving the room.
         Door(
           Offset(ccx * cell, 4.5 * cell),
           DoorDef('⚙', 'SETTINGS', 'audio · shake · haptics',
+              DoorKind.shrine, (_) {}),
+        ),
+        Door(
+          Offset((ccx - 2.0) * cell, 11.4 * cell),
+          DoorDef('🗡', 'ARSENAL', 'pick your starting weapon',
+              DoorKind.shrine, (_) {}),
+        ),
+        Door(
+          Offset((ccx + 2.0) * cell, 11.4 * cell),
+          DoorDef('🎁', 'KEEPSAKE STAND', 'equip a trinket',
               DoorKind.shrine, (_) {}),
         ),
         Door(
@@ -1424,6 +1498,12 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
     } else if (label == 'SETTINGS') {
       route = const SettingsScreen();
       resetOnReturn = false;
+    } else if (label == 'KEEPSAKE STAND') {
+      route = const KeepsakeStandScreen();
+      resetOnReturn = false;
+    } else if (label == 'ARSENAL') {
+      route = const ArsenalScreen();
+      resetOnReturn = false;
     }
     if (route == null) return;
     final w = route;
@@ -1803,6 +1883,152 @@ class _HomeScreenState extends State<HomeScreen> {
 /// ---------------------------------------------------------------------------
 /// Character select
 /// ---------------------------------------------------------------------------
+/// Pre-run keepsake picker — same look as the post-character-select one
+/// but it just pops back to the home so the player can keep tinkering.
+class KeepsakeStandScreen extends StatelessWidget {
+  const KeepsakeStandScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final list = availableKeepsakes();
+    Widget tile({required String name, required String desc,
+        required Color color, required VoidCallback onTap}) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1F1D2E),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: color),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(name,
+                  style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15)),
+              const SizedBox(height: 2),
+              Text(desc,
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 12)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('KEEPSAKE STAND')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          tile(
+              name: 'NO KEEPSAKE',
+              desc: Loadout.keepsake == null
+                  ? 'currently selected'
+                  : 'unequip your current keepsake',
+              color: Loadout.keepsake == null
+                  ? const Color(0xFFFFD45E)
+                  : Colors.white24,
+              onTap: () {
+                Loadout.keepsake = null;
+                Navigator.of(context).pop();
+              }),
+          for (final k in list)
+            tile(
+                name:
+                    '${k.name}${Loadout.keepsake == k ? '  ★' : ''}',
+                desc: k.desc,
+                color: Loadout.keepsake == k
+                    ? const Color(0xFFFFD45E)
+                    : const Color(0xFF8CC8FF),
+                onTap: () {
+                  Loadout.keepsake = k;
+                  Navigator.of(context).pop();
+                }),
+        ],
+      ),
+    );
+  }
+}
+
+/// Arsenal: pick which weapon you start the next run with. Null falls back
+/// to the hero's default SIDEARM at run init.
+class ArsenalScreen extends StatelessWidget {
+  const ArsenalScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    Widget tile(WeaponDef? w) {
+      final selected = identical(Loadout.startingWeapon, w);
+      final name = w == null ? kDefaultWeapon.name : w.name;
+      final desc = w == null ? 'hero default — ${kDefaultWeapon.desc}' : w.desc;
+      return InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () {
+          Loadout.startingWeapon = w;
+          Navigator.of(context).pop();
+        },
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1F1D2E),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+                color: selected
+                    ? const Color(0xFFFFD45E)
+                    : const Color(0xFFFFB347),
+                width: selected ? 2 : 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Text(name,
+                    style: const TextStyle(
+                        color: Color(0xFFFFD45E),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15)),
+                if (selected) ...[
+                  const SizedBox(width: 6),
+                  const Text('★',
+                      style: TextStyle(color: Color(0xFFFFD45E))),
+                ],
+              ]),
+              const SizedBox(height: 2),
+              Text(desc,
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 12)),
+              if (w != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                    'dmg ×${w.dmgMul.toStringAsFixed(2)}  rof ×${w.rofMul.toStringAsFixed(2)}  spd ×${w.speedMul.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 11)),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('ARSENAL')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          tile(null),
+          for (final w in kWeapons) tile(w),
+        ],
+      ),
+    );
+  }
+}
+
 class RelationshipsScreen extends StatelessWidget {
   const RelationshipsScreen({super.key});
 
@@ -2339,7 +2565,7 @@ class KeepsakeScreen extends StatelessWidget {
                       fontWeight: FontWeight.w900, color: Colors.white)),
             ),
           ),
-          for (final k in kKeepsakes)
+          for (final k in availableKeepsakes())
             InkWell(
               borderRadius: BorderRadius.circular(14),
               onTap: () {
@@ -3212,6 +3438,9 @@ class _GameScreenState extends State<GameScreen>
     }
     _p = Player(widget.def);
     Loadout.keepsake?.apply(_p);
+    if (Loadout.startingWeapon != null) {
+      _p.weapon = Loadout.startingWeapon!;
+    }
     if (Loadout.blessingDmg > 0) {
       _p.damage += Loadout.blessingDmg;
       Loadout.blessingDmg = 0;
