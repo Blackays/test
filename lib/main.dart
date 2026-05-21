@@ -995,6 +995,7 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
                       enemies: const <Enemy>[],
                       bolts: const <Bolt>[],
                       ebolts: const <EBolt>[],
+                      grenades: const <Grenade>[],
                       orbs: const <Orb>[],
                       hearts: const <Heart>[],
                       bursts: const <Burst>[],
@@ -1272,6 +1273,12 @@ class BestiaryScreen extends StatelessWidget {
         'heals from any damage it lands on you. do not let it touch.'),
     (8, 'KAMIKAZE', Color(0xFFFF6432),
         'fast, fragile, explodes in a wide AoE the instant it reaches you.'),
+    (9, 'GRENADIER', Color(0xFF5C8A3C),
+        'keeps distance and lobs arcing grenades. dodge the orange ring.'),
+    (10, 'BULL', Color(0xFF5C3A22),
+        'paws the ground, then charges in a straight line. sidestep the beam.'),
+    (11, 'SLAMMER', Color(0xFFB94CFF),
+        'leaps into the air and slams your last known spot — keep moving.'),
   ];
 
   @override
@@ -1865,6 +1872,32 @@ class Enemy {
   double novaT = 5.0; // time until next nova starts winding up
   double novaTele = 0; // current telegraph timer (0 = idle, >0 = winding up)
   double novaRadius = 0;
+  // Bull (kind 10) charge state machine.
+  double chargeCd = 3.0; // time until next wind-up
+  double chargeWind = 0; // >0 = winding up (telegraphed)
+  double chargeRem = 0; // >0 = currently dashing
+  Offset chargeDir = Offset.zero;
+  double stunT = 0; // brief stun after wall-collision
+  // Slammer (kind 11) jump-and-slam state machine.
+  double slamCd = 3.5;
+  double slamT = 0; // >0 while airborne, lands at 0
+  Offset slamTarget = Offset.zero;
+  // Grenadier (kind 9) throw cooldown.
+  double grenadeT = 1.6;
+}
+
+// Lobbed grenade with a 1.1s flight arc and an AoE explosion on landing.
+class Grenade {
+  Grenade(this.origin, this.target, this.damage);
+  final Offset origin;
+  final Offset target;
+  final double damage;
+  double t = 0;
+  static const double total = 1.1;
+  Offset get pos => Offset.lerp(origin, target, progress)!;
+  double get lift => sin(progress * pi) * 56; // peak ~56 mid-flight
+  double get progress => (t / total).clamp(0.0, 1.0).toDouble();
+  bool get landed => t >= total;
 }
 
 class Bolt {
@@ -2056,7 +2089,7 @@ class GameStats {
       bestCombo = p.getInt('bb_bestCombo') ?? 0;
       totalBossKills = p.getInt('bb_totalBossKills') ?? 0;
       killsByKind.clear();
-      for (int k = 0; k < 9; k++) {
+      for (int k = 0; k < 12; k++) {
         final n = p.getInt('bb_killsK$k') ?? 0;
         if (n > 0) killsByKind[k] = n;
       }
@@ -2143,6 +2176,7 @@ class _GameScreenState extends State<GameScreen>
   final List<Enemy> _enemies = [];
   final List<Bolt> _bolts = [];
   final List<EBolt> _ebolts = [];
+  final List<Grenade> _grenades = [];
   final List<Orb> _orbs = [];
   final List<Heart> _hearts = [];
   final List<Toast> _toasts = [];
@@ -2233,6 +2267,7 @@ class _GameScreenState extends State<GameScreen>
     _enemies.clear();
     _bolts.clear();
     _ebolts.clear();
+    _grenades.clear();
     _orbs.clear();
     _hearts.clear();
     _toasts.clear();
@@ -2671,6 +2706,20 @@ class _GameScreenState extends State<GameScreen>
     _ebolts.removeWhere(
         (e) => e.life <= 0 || _map.blocksShot(e.pos.dx, e.pos.dy));
 
+    for (final g in _grenades) {
+      g.t += dt;
+      if (g.landed) {
+        _bursts.add(Burst(g.target, 70));
+        _shake = max(_shake, 4.0);
+        Sfx.play('kill', vol: 0.6, pitch: 0.95);
+        if ((_p.pos - g.target).distance < 60 && _p.invuln <= 0) {
+          _hurtPlayer(g.damage * 1.4);
+          if (_phase != Phase.playing) return;
+        }
+      }
+    }
+    _grenades.removeWhere((g) => g.landed);
+
     for (final e in _enemies) {
       final dir = _p.pos - e.pos;
       final d = dir.distance;
@@ -2757,6 +2806,96 @@ class _GameScreenState extends State<GameScreen>
             _pathClear(e.pos, _p.pos)) {
           e.shootTimer = 1.7;
           _ebolts.add(EBolt(e.pos, dir / d * 220, e.damage, kind: e.boltKind));
+        }
+      } else if (e.kind == 9) {
+        // GRENADIER: keep medium distance + lob arcing grenades.
+        if (d < 240 && d > 0.01) {
+          e.pos = _slide(e.pos, -dir / d * e.speed * dt, rad);
+        } else if (d > 360 && d > 0.01) {
+          final chase = _pathClear(e.pos, _p.pos)
+              ? dir / d
+              : _flowStep(e.pos);
+          if (chase != Offset.zero) {
+            e.pos = _slide(e.pos, chase * e.speed * dt, rad);
+          }
+        }
+        e.grenadeT -= dt;
+        if (e.grenadeT <= 0 && d < 520 && d > 0.01) {
+          e.grenadeT = 2.4;
+          _grenades.add(Grenade(e.pos, _p.pos, e.damage));
+        }
+      } else if (e.kind == 10) {
+        // BULL: walk → wind up (telegraph) → charge → optional wall-stun.
+        if (e.stunT > 0) {
+          e.stunT -= dt;
+        } else if (e.chargeRem > 0) {
+          // Currently dashing in the locked direction.
+          e.chargeRem -= dt;
+          final before = e.pos;
+          e.pos = _slide(e.pos, e.chargeDir * 360 * dt, rad);
+          // If a wall blocked the slide (no progress), stun briefly.
+          if ((e.pos - before).distance < 1 && e.chargeRem > 0.05) {
+            e.stunT = 0.7;
+            e.chargeRem = 0;
+            _bursts.add(Burst(e.pos, 28));
+            _shake = max(_shake, 4.0);
+          }
+        } else if (e.chargeWind > 0) {
+          e.chargeWind -= dt;
+          if (e.chargeWind <= 0) {
+            // Lock direction toward the player at this instant.
+            if (d > 0.01) {
+              e.chargeDir = dir / d;
+            } else {
+              e.chargeDir = const Offset(1, 0);
+            }
+            e.chargeRem = 0.75;
+            Sfx.play('kill', vol: 0.5, pitch: 0.8);
+          }
+        } else {
+          // Walk normally; queue a charge every ~3-4s when in sight.
+          if (d > 0.01) {
+            final step = _pathClear(e.pos, _p.pos) ? dir / d : _flowStep(e.pos);
+            if (step != Offset.zero) {
+              e.pos = _slide(e.pos, step * e.speed * dt, rad);
+            }
+          }
+          e.chargeCd -= dt;
+          if (e.chargeCd <= 0 && d < 340 && _pathClear(e.pos, _p.pos)) {
+            e.chargeWind = 1.0;
+            e.chargeCd = 3.6 + _rng.nextDouble() * 1.2;
+          }
+        }
+      } else if (e.kind == 11) {
+        // SLAMMER: walks, jumps periodically. While airborne it locks a
+        // landing reticle and drops there for AoE damage.
+        if (e.slamT > 0) {
+          e.slamT -= dt;
+          if (e.slamT <= 0) {
+            // Land + slam.
+            e.pos = e.slamTarget;
+            _bursts.add(Burst(e.slamTarget, 72));
+            _shake = max(_shake, 6.0);
+            Sfx.play('kill', vol: 0.6, pitch: 0.85);
+            if ((_p.pos - e.slamTarget).distance < 60 && _p.invuln <= 0) {
+              _hurtPlayer(e.damage * 1.4);
+              if (_phase != Phase.playing) return;
+            }
+            e.slamCd = 3.0 + _rng.nextDouble();
+          }
+        } else {
+          if (d > 0.01) {
+            final step = _pathClear(e.pos, _p.pos) ? dir / d : _flowStep(e.pos);
+            if (step != Offset.zero) {
+              e.pos = _slide(e.pos, step * e.speed * dt, rad);
+            }
+          }
+          e.slamCd -= dt;
+          if (e.slamCd <= 0 && d < 420) {
+            e.slamT = 1.2;
+            e.slamTarget = _p.pos;
+            Sfx.play('dash', vol: 0.5, pitch: 1.1);
+          }
         }
       } else if (d > 0.01) {
         // Walk straight when there's line of sight; otherwise follow the
@@ -3212,7 +3351,43 @@ class _GameScreenState extends State<GameScreen>
     }
 
     final roll = _rng.nextDouble();
-    if (_floorIdx >= 1 && roll < 0.08) {
+    if (_floorIdx >= 2 && roll < 0.05) {
+      // GRENADIER: slow tosser. Lobs an AoE grenade every couple of seconds.
+      _enemies.add(Enemy(
+        pos: p,
+        hp: (7 + _wave * 0.9) * f.hpMul,
+        speed: (62 + _wave * 0.5) * f.spdMul,
+        damage: 1.8 * f.dmgMul,
+        radius: 15,
+        kind: 9,
+        bounty: 3,
+        xp: _xpFor(2),
+      ));
+    } else if (_floorIdx >= 1 && roll < 0.11) {
+      // BULL: walks slowly, winds up, then charges in a straight line.
+      _enemies.add(Enemy(
+        pos: p,
+        hp: (16 + _wave * 1.7) * f.hpMul * ws,
+        speed: (80 + _wave * 0.7) * f.spdMul,
+        damage: 2.4 * f.dmgMul,
+        radius: 22,
+        kind: 10,
+        bounty: 4,
+        xp: _xpFor(2),
+      ));
+    } else if (_floorIdx >= 2 && roll < 0.16) {
+      // SLAMMER: walker that jumps + slams the player's last position.
+      _enemies.add(Enemy(
+        pos: p,
+        hp: (8 + _wave * 1.0) * f.hpMul,
+        speed: (88 + _wave * 0.9) * f.spdMul,
+        damage: 2.0 * f.dmgMul,
+        radius: 18,
+        kind: 11,
+        bounty: 3,
+        xp: _xpFor(2),
+      ));
+    } else if (_floorIdx >= 1 && roll < 0.22) {
       // KAMIKAZE: fast and fragile, but explodes on touch.
       _enemies.add(Enemy(
         pos: p,
@@ -3224,7 +3399,7 @@ class _GameScreenState extends State<GameScreen>
         bounty: 2,
         xp: _xpFor(1),
       ));
-    } else if (_floorIdx >= 1 && roll < 0.16) {
+    } else if (_floorIdx >= 1 && roll < 0.28) {
       // SHIELDED: tanky brute that halves damage above 50% HP.
       _enemies.add(Enemy(
         pos: p,
@@ -3236,7 +3411,7 @@ class _GameScreenState extends State<GameScreen>
         bounty: 4,
         xp: _xpFor(2),
       ));
-    } else if (_floorIdx >= 2 && roll < 0.24) {
+    } else if (_floorIdx >= 2 && roll < 0.34) {
       // FROST: chills the player's movement on contact.
       _enemies.add(Enemy(
         pos: p,
@@ -3248,7 +3423,7 @@ class _GameScreenState extends State<GameScreen>
         bounty: 2,
         xp: _xpFor(1),
       ));
-    } else if (_floorIdx >= 3 && roll < 0.31) {
+    } else if (_floorIdx >= 3 && roll < 0.40) {
       // VAMPIRE: heals from contact damage dealt.
       _enemies.add(Enemy(
         pos: p,
@@ -3260,7 +3435,7 @@ class _GameScreenState extends State<GameScreen>
         bounty: 3,
         xp: _xpFor(2),
       ));
-    } else if (_floorIdx >= 2 && roll < 0.40) {
+    } else if (_floorIdx >= 2 && roll < 0.50) {
       // Ranged shooter / kiter.
       _enemies.add(Enemy(
         pos: p,
@@ -3272,7 +3447,7 @@ class _GameScreenState extends State<GameScreen>
         bounty: 2,
         xp: _xpFor(4),
       ));
-    } else if (roll < 0.55 + _floorIdx * 0.02) {
+    } else if (roll < 0.65 + _floorIdx * 0.02) {
       _enemies.add(Enemy(
         pos: p,
         hp: (2 + _wave * 0.35) * f.hpMul * ws,
@@ -3283,7 +3458,7 @@ class _GameScreenState extends State<GameScreen>
         bounty: 1,
         xp: _xpFor(1),
       ));
-    } else if (roll < 0.72) {
+    } else if (roll < 0.82) {
       _enemies.add(Enemy(
         pos: p,
         hp: (9 + _wave * 1.4) * f.hpMul * ws,
@@ -3822,6 +3997,7 @@ class _GameScreenState extends State<GameScreen>
                       enemies: _enemies,
                       bolts: _bolts,
                       ebolts: _ebolts,
+                      grenades: _grenades,
                       orbs: _orbs,
                       hearts: _hearts,
                       bursts: _bursts,
@@ -5120,6 +5296,7 @@ class WorldPainter extends CustomPainter {
     required this.enemies,
     required this.bolts,
     required this.ebolts,
+    required this.grenades,
     required this.orbs,
     required this.hearts,
     required this.bursts,
@@ -5147,6 +5324,7 @@ class WorldPainter extends CustomPainter {
   final List<Enemy> enemies;
   final List<Bolt> bolts;
   final List<EBolt> ebolts;
+  final List<Grenade> grenades;
   final List<Orb> orbs;
   final List<Heart> hearts;
   final List<Burst> bursts;
@@ -5201,6 +5379,7 @@ class WorldPainter extends CustomPainter {
     // Aim indicator: a soft pulsing ring around whichever enemy the
     // auto-aim is currently locked onto. Drawn above entities so it
     // reads even against busy backgrounds.
+    _paintTelegraphs(canvas);
     _paintAim(canvas);
     // Small fast projectiles are drawn flat on top of the depth-sorted
     // pass instead of going through it — saves a closure + tuple per bolt
@@ -5277,6 +5456,120 @@ class WorldPainter extends CustomPainter {
     _mapBgCache.clear();
     _poolTiles.clear();
     _wallEntries.clear();
+  }
+
+  // Telegraph + projectile pass for the three "elite" elites:
+  //   - Bull (kind 10): yellow charge-up beam and dust streak.
+  //   - Slammer (kind 11): growing yellow landing reticle.
+  //   - Grenadier (kind 9): arcing grenade with shadow + landing zone.
+  // All drawn above the depth queue so telegraphs read against busy combat.
+  void _paintTelegraphs(Canvas canvas) {
+    // Per-enemy telegraphs.
+    for (final e in enemies) {
+      if (e.kind == 10) {
+        if (e.chargeWind > 0) {
+          // Wind-up: short orange line in the direction of the player.
+          _projAt(canvas, e.pos, 0, () {
+            final dir = player.pos - e.pos;
+            final d = dir.distance;
+            if (d < 0.01) return;
+            final unit = dir / d;
+            final t = 1 - (e.chargeWind / 1.0).clamp(0.0, 1.0);
+            const length = 220.0;
+            final end = e.pos + unit * length;
+            canvas.drawLine(
+                e.pos,
+                end,
+                Paint()
+                  ..color = const Color(0xFFFFD45E)
+                      .withValues(alpha: 0.20 + 0.45 * t)
+                  ..strokeWidth = 6 + 8 * t
+                  ..strokeCap = StrokeCap.round);
+            canvas.drawLine(
+                e.pos,
+                end,
+                Paint()
+                  ..color = const Color(0xFFFF6B3C)
+                      .withValues(alpha: 0.6 * t)
+                  ..strokeWidth = 2);
+          });
+        } else if (e.chargeRem > 0) {
+          // Active dash: short orange streak behind in the locked direction.
+          _projAt(canvas, e.pos, 0, () {
+            final back = e.pos - e.chargeDir * 36;
+            canvas.drawLine(
+                back,
+                e.pos,
+                Paint()
+                  ..color = const Color(0xFFFF6B3C).withValues(alpha: 0.5)
+                  ..strokeWidth = 8
+                  ..strokeCap = StrokeCap.round);
+          });
+        }
+      } else if (e.kind == 11 && e.slamT > 0) {
+        // Growing yellow landing reticle at the locked target.
+        _projAt(canvas, e.slamTarget, 0, () {
+          final p = (1.2 - e.slamT).clamp(0.0, 1.2) / 1.2;
+          final radius = 22 + 38 * p;
+          final col = Color.lerp(
+              const Color(0xFFFFD45E), const Color(0xFFFF3B5C), p * p)!;
+          canvas.drawCircle(
+              e.slamTarget,
+              radius,
+              Paint()..color = col.withValues(alpha: 0.18 + 0.18 * p));
+          canvas.drawCircle(
+              e.slamTarget,
+              radius,
+              Paint()
+                ..color = col.withValues(alpha: 0.6 + 0.3 * p)
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 2 + 2 * p);
+          // Crosshair brackets.
+          final cross = Paint()
+            ..color = col.withValues(alpha: 0.8)
+            ..strokeWidth = 2;
+          canvas.drawLine(e.slamTarget.translate(-radius - 6, 0),
+              e.slamTarget.translate(-radius + 6, 0), cross);
+          canvas.drawLine(e.slamTarget.translate(radius - 6, 0),
+              e.slamTarget.translate(radius + 6, 0), cross);
+        });
+      }
+    }
+    // Grenades: ground shadow + airborne body + landing reticle.
+    for (final g in grenades) {
+      final landP = g.progress;
+      // Ground shadow follows the projected (x,y) on the floor.
+      _projAt(canvas, g.pos, 0, () {
+        canvas.drawOval(
+            Rect.fromCenter(
+                center: g.pos, width: 18 - landP * 4, height: 8 - landP * 2),
+            Paint()..color = const Color(0x66000000));
+      });
+      // Landing-zone reticle at the impact site grows as it approaches land.
+      _projAt(canvas, g.target, 0, () {
+        canvas.drawCircle(
+            g.target,
+            12 + landP * 38,
+            Paint()
+              ..color = const Color(0xFFFFA84C)
+                  .withValues(alpha: 0.20 + 0.20 * landP));
+        canvas.drawCircle(
+            g.target,
+            12 + landP * 38,
+            Paint()
+              ..color = const Color(0xFFFFA84C)
+                  .withValues(alpha: 0.6 + 0.3 * landP)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2);
+      });
+      // Body lifted off the ground along a sine arc.
+      _projAt(canvas, g.pos, g.lift, () {
+        canvas.drawCircle(g.pos, 8,
+            Paint()..color = const Color(0xFFFFE2B0).withValues(alpha: 0.4));
+        canvas.drawCircle(
+            g.pos, 5, Paint()..color = const Color(0xFFFF8A4C));
+      });
+    }
   }
 
   // Pulsing reticle around the locked-on enemy so the player can see where
@@ -5699,6 +5992,9 @@ class WorldPainter extends CustomPainter {
     }
 
     for (final e in enemies) {
+      // Slammers go offscreen while airborne — the floor reticle is the only
+      // tell the player needs while they decide where to dodge.
+      if (e.kind == 11 && e.slamT > 0) continue;
       add(dep(e.pos), () => _projAt(canvas, e.pos, 0, () {
       final base = switch (e.kind) {
         1 => const Color(0xFFFF8A4C),
@@ -5709,6 +6005,9 @@ class WorldPainter extends CustomPainter {
         6 => const Color(0xFFA9E8FF), // FROST — ice cyan
         7 => const Color(0xFF8E1A2B), // VAMPIRE — blood red
         8 => const Color(0xFFFF6432), // KAMIKAZE — fuse orange
+        9 => const Color(0xFF5C8A3C), // GRENADIER — moss green
+        10 => const Color(0xFF5C3A22), // BULL — leather brown
+        11 => const Color(0xFFB94CFF), // SLAMMER — bright magenta
         _ => floor.mob,
       };
       canvas.drawOval(
