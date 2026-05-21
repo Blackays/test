@@ -284,6 +284,8 @@ class Loadout {
   static int? dailySeed;
   // Pre-run picks set at the home stands. Null = use the hero default.
   static WeaponDef? startingWeapon;
+  // Bonus obols the player walks in with, set at the Trade Post.
+  static int startingObols = 0;
   // NPC blessings — set in the home, applied + consumed at run start.
   static int blessingDmg = 0; // Smith: +damage
   static int blessingHp = 0; // Hypnos: +max HP
@@ -926,6 +928,16 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
               DoorKind.shrine, (_) {}),
         ),
         Door(
+          Offset((ccx - 2.0) * cell, 7.5 * cell),
+          DoorDef('🎯', 'TRAINING DUMMY',
+              'preview damage + DPS', DoorKind.shrine, (_) {}),
+        ),
+        Door(
+          Offset((ccx + 2.0) * cell, 7.5 * cell),
+          DoorDef('💱', 'TRADE POST',
+              'spend shards on run blessings', DoorKind.shrine, (_) {}),
+        ),
+        Door(
           Offset(ccx * cell, 13.2 * cell),
           DoorDef('⚔', 'BEGIN RUN', 'fight through the dungeon',
               DoorKind.reward, (_) {}),
@@ -1504,6 +1516,12 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
     } else if (label == 'ARSENAL') {
       route = const ArsenalScreen();
       resetOnReturn = false;
+    } else if (label == 'TRADE POST') {
+      route = const TradePostScreen();
+      resetOnReturn = false;
+    } else if (label == 'TRAINING DUMMY') {
+      route = const TrainingDummyScreen();
+      resetOnReturn = false;
     }
     if (route == null) return;
     final w = route;
@@ -1883,6 +1901,367 @@ class _HomeScreenState extends State<HomeScreen> {
 /// ---------------------------------------------------------------------------
 /// Character select
 /// ---------------------------------------------------------------------------
+/// One row in the rotating Trade Post inventory. Effects either bump a
+/// blessing field (consumed at run start) or top up the persistent stash.
+class _TradeOffer {
+  const _TradeOffer(this.label, this.desc, this.cost, this.apply);
+  final String label;
+  final String desc;
+  final int cost; // in 🔷 shards
+  final void Function() apply;
+}
+
+class TradePostScreen extends StatefulWidget {
+  const TradePostScreen({super.key});
+  @override
+  State<TradePostScreen> createState() => _TradePostScreenState();
+}
+
+class _TradePostScreenState extends State<TradePostScreen> {
+  static final Random _rng = Random();
+  late List<_TradeOffer> _stock;
+
+  // Pool of possible wares. The shop rolls a fresh subset every visit /
+  // reroll; each consumes shards on purchase and applies its effect.
+  static final List<_TradeOffer> _pool = [
+    _TradeOffer('🍯 BOTTLE OF NECTAR', '+2 nectar in your stash', 6, () {
+      NpcStore.nectar += 2;
+      NpcStore.lifetimeNectar += 2;
+      NpcStore.save();
+    }),
+    _TradeOffer('🗡 IRON SCRAP', '+1 starting damage next run', 10,
+        () => Loadout.blessingDmg += 1),
+    _TradeOffer('❤ HEALTH POTION', '+5 starting max HP next run', 8,
+        () => Loadout.blessingHp += 5),
+    _TradeOffer('🛡 HOLY TALISMAN', '+1 starting Death Defiance', 16,
+        () => Loadout.blessingRevives += 1),
+    _TradeOffer('🔮 ETHER VIAL', '+1 starting MP/sec next run', 10,
+        () => Loadout.blessingMpRegen += 1.0),
+    _TradeOffer('🌟 SHARPENING OIL', '+5% crit next run', 12,
+        () => Loadout.blessingCritChance += 0.05),
+    _TradeOffer('🧪 STEADY TONIC', '+1 HP/sec regen next run', 10,
+        () => Loadout.blessingRegen += 1.0),
+    _TradeOffer('💰 LUCKY COIN', '+50 starting obols next run', 6,
+        () => Loadout.startingObols += 50),
+  ];
+
+  static const int _slots = 4;
+  static const int _rerollCost = 2;
+
+  @override
+  void initState() {
+    super.initState();
+    _stock = _rollStock();
+  }
+
+  List<_TradeOffer> _rollStock() {
+    final copy = List<_TradeOffer>.from(_pool)..shuffle(_rng);
+    return copy.take(_slots).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('TRADE POST')),
+      body: Column(children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          color: const Color(0xFF1F1D2E),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('🔷 ${MetaStore.shards} shards',
+                  style: const TextStyle(
+                      color: Color(0xFF8CC8FF),
+                      fontWeight: FontWeight.w900)),
+              Text('🍯 ${NpcStore.nectar}',
+                  style: const TextStyle(
+                      color: Color(0xFFFFD45E),
+                      fontWeight: FontWeight.w900)),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.all(14),
+            itemCount: _stock.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
+            itemBuilder: (_, i) {
+              final o = _stock[i];
+              final afford = MetaStore.shards >= o.cost;
+              return InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: afford
+                    ? () {
+                        MetaStore.shards -= o.cost;
+                        MetaStore.save();
+                        o.apply();
+                        setState(() {
+                          _stock = _stock
+                              .where((x) => x != o)
+                              .toList(growable: false);
+                        });
+                      }
+                    : null,
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1F1D2E),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                        color: afford
+                            ? const Color(0xFFFFD45E)
+                            : Colors.white24),
+                  ),
+                  child: Row(children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(o.label,
+                              style: const TextStyle(
+                                  color: Color(0xFFFFD45E),
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 15)),
+                          Text(o.desc,
+                              style: const TextStyle(
+                                  color: Colors.white70, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                    Text('🔷${o.cost}',
+                        style: TextStyle(
+                            color: afford
+                                ? const Color(0xFF8CC8FF)
+                                : Colors.white38,
+                            fontWeight: FontWeight.w900)),
+                  ]),
+                ),
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: MetaStore.shards >= _rerollCost
+                ? () {
+                    MetaStore.shards -= _rerollCost;
+                    MetaStore.save();
+                    setState(() => _stock = _rollStock());
+                  }
+                : null,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0x118CC8FF),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF8CC8FF)),
+              ),
+              child: Center(
+                child: Text('REROLL STOCK · 🔷$_rerollCost',
+                    style: TextStyle(
+                        color: MetaStore.shards >= _rerollCost
+                            ? const Color(0xFF8CC8FF)
+                            : Colors.white38,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        letterSpacing: 2)),
+              ),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Training Dummy: shows the player's projected DPS for the active
+/// loadout and lets them tap a dummy to see crits / hits land live.
+class TrainingDummyScreen extends StatefulWidget {
+  const TrainingDummyScreen({super.key});
+  @override
+  State<TrainingDummyScreen> createState() => _TrainingDummyScreenState();
+}
+
+class _TrainingDummyScreenState extends State<TrainingDummyScreen>
+    with SingleTickerProviderStateMixin {
+  static final Random _rng = Random();
+  late Player _p;
+  final List<FloatText> _hits = [];
+  double _dummyHp = 200;
+  double _dummyMax = 200;
+  late final Ticker _ticker;
+  Duration _last = Duration.zero;
+  // Window timer for DPS estimate.
+  double _windowDamage = 0;
+  double _windowT = 0;
+  double _displayedDps = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _p = Player(kHeroes.first);
+    Loadout.keepsake?.apply(_p);
+    // Apply pending blessings READ-ONLY for the preview, so the player
+    // sees what their next-run damage will look like.
+    _p.damage += Loadout.blessingDmg;
+    _p.maxHp += Loadout.blessingHp;
+    _p.mpRegen += Loadout.blessingMpRegen;
+    _p.critChance += Loadout.blessingCritChance;
+    if (Loadout.startingWeapon != null) _p.weapon = Loadout.startingWeapon!;
+    _ticker = createTicker((elapsed) {
+      var dt = (elapsed - _last).inMicroseconds / 1e6;
+      _last = elapsed;
+      if (dt > 1 / 30) dt = 1 / 30;
+      _windowT += dt;
+      for (final h in _hits) {
+        h.pos = h.pos.translate(0, -45 * dt);
+        h.life -= dt;
+      }
+      _hits.removeWhere((h) => h.life <= 0);
+      if (_windowT > 1.0) {
+        _displayedDps = _windowDamage / _windowT;
+        _windowDamage = 0;
+        _windowT = 0;
+      }
+      setState(() {});
+    })
+      ..start();
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  void _strike() {
+    final crit = _rng.nextDouble() < _p.critChance;
+    final dmg = _p.damage * (crit ? 1.8 : 1.0) * _p.weapon.dmgMul;
+    _dummyHp -= dmg;
+    _windowDamage += dmg;
+    _hits.add(FloatText(
+      const Offset(0, 0),
+      '${dmg.toStringAsFixed(1)}${crit ? '!' : ''}',
+      crit ? const Color(0xFFFF9A3C) : Colors.white,
+      size: crit ? 22 : 14,
+    ));
+    if (_dummyHp <= 0) {
+      _dummyHp = _dummyMax;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dpsEstimate =
+        _p.damage * _p.weapon.dmgMul / (_p.fireInterval * _p.weapon.rofMul);
+    return Scaffold(
+      appBar: AppBar(title: const Text('TRAINING DUMMY')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(children: [
+          // Loadout summary tile.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1F1D2E),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFFFD45E)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('WEAPON · ${_p.weapon.name}',
+                    style: const TextStyle(
+                        color: Color(0xFFFFD45E),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13)),
+                const SizedBox(height: 4),
+                Text(
+                    'dmg/hit ${(_p.damage * _p.weapon.dmgMul).toStringAsFixed(1)}  ·  fire ${(_p.fireInterval * _p.weapon.rofMul).toStringAsFixed(2)}s  ·  crit ${(_p.critChance * 100).round()}%',
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 11)),
+                const SizedBox(height: 2),
+                Text(
+                    'theoretical DPS ${dpsEstimate.toStringAsFixed(1)}  ·  live DPS ${_displayedDps.toStringAsFixed(1)}',
+                    style: const TextStyle(
+                        color: Color(0xFF8CFF98), fontSize: 11)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 28),
+          Expanded(
+            child: Center(
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  GestureDetector(
+                    onTap: _strike,
+                    child: Container(
+                      width: 180,
+                      height: 180,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: const RadialGradient(
+                          center: Alignment(-0.3, -0.4),
+                          colors: [
+                            Color(0xFFB87333),
+                            Color(0xFF4F2F18),
+                          ],
+                        ),
+                        border: Border.all(
+                            color: const Color(0xFFFFD45E), width: 3),
+                      ),
+                      child: const Center(
+                          child: Text('🎯',
+                              style: TextStyle(fontSize: 64))),
+                    ),
+                  ),
+                  for (final h in _hits)
+                    Transform.translate(
+                      offset: h.pos,
+                      child: Opacity(
+                        opacity: h.life.clamp(0.0, 1.0).toDouble(),
+                        child: Text(h.text,
+                            style: TextStyle(
+                                color: h.color,
+                                fontWeight: FontWeight.w900,
+                                fontSize: h.size + 4,
+                                fontFamily: 'RobotoMono')),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Container(
+              width: double.infinity,
+              height: 10,
+              color: const Color(0xFF1F1D2E),
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: (_dummyHp / _dummyMax).clamp(0.0, 1.0),
+                child: Container(color: const Color(0xFFFF5C6C)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text('tap the dummy to swing',
+              style: TextStyle(color: Colors.white54, fontSize: 11)),
+          const SizedBox(height: 16),
+        ]),
+      ),
+    );
+  }
+}
+
 /// Pre-run keepsake picker — same look as the post-character-select one
 /// but it just pops back to the home so the player can keep tinkering.
 class KeepsakeStandScreen extends StatelessWidget {
@@ -3440,6 +3819,10 @@ class _GameScreenState extends State<GameScreen>
     Loadout.keepsake?.apply(_p);
     if (Loadout.startingWeapon != null) {
       _p.weapon = Loadout.startingWeapon!;
+    }
+    if (Loadout.startingObols > 0) {
+      _p.obols += Loadout.startingObols;
+      Loadout.startingObols = 0;
     }
     if (Loadout.blessingDmg > 0) {
       _p.damage += Loadout.blessingDmg;
