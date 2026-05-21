@@ -228,6 +228,8 @@ class Loadout {
   static int blessingRevives = 0; // Achilles: +revives
   static double blessingMpRegen = 0; // Dusa: +MP/sec
   static double blessingNectarBonus = 0; // Chef: extra nectar drop chance
+  static double blessingCritChance = 0; // Scribe: +crit chance
+  static double blessingRegen = 0; // Apothecary: +HP/sec
   static String? dailyKey; // YYYYMMDD format
 
   static String todayKey() {
@@ -945,6 +947,34 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
               "everything tastes better with a sharp edge — go see the smith.",
             ],
           ),
+        if (NpcStore.rescued.contains('scribe'))
+          HomeNpc(
+            id: 'scribe',
+            pos: Offset((rcx - 0.8) * cell, 5.4 * cell),
+            name: 'THE SCRIBE',
+            icon: '📜',
+            color: const Color(0xFF8CC8FF),
+            lines: const [
+              "ink and quill — i record your every choice.",
+              "twenty-three boons last week. your aim improves.",
+              "a sharper eye is just a small etching away.",
+              "the codex remembers what you forget.",
+            ],
+          ),
+        if (NpcStore.rescued.contains('apothecary'))
+          HomeNpc(
+            id: 'apothecary',
+            pos: Offset((ccx + 0.5) * cell, 5.4 * cell),
+            name: 'THE APOTHECARY',
+            icon: '🧪',
+            color: const Color(0xFF8CFF98),
+            lines: const [
+              "salts, poultices, and a dash of nectar — that's the recipe.",
+              "a slow heal beats a sudden hit. drink up.",
+              "i've got herbs that knit you while you walk.",
+              "next run — try not to bleed everywhere this time.",
+            ],
+          ),
       ]);
     for (final n in _npcs) {
       n.lineIdx = _rng.nextInt(n.lines.length);
@@ -1124,6 +1154,40 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
                 }
               : null,
         );
+      case 'scribe':
+        return _NpcBlessing(
+          label: tier >= 1
+              ? (hasNectar
+                  ? '📜 ETCHING +5% CRIT (1🍯)'
+                  : '📜 NEED NECTAR')
+              : '📜 LOCKED — GIFT TO REACH ★',
+          color: const Color(0xFF8CC8FF),
+          onTap: tier >= 1 && hasNectar
+              ? () {
+                  NpcStore.nectar -= 1;
+                  NpcStore.save();
+                  Loadout.blessingCritChance += 0.05;
+                  setState(() {});
+                }
+              : null,
+        );
+      case 'apothecary':
+        return _NpcBlessing(
+          label: tier >= 1
+              ? (hasNectar
+                  ? '🧪 POULTICE +1 HP/SEC (1🍯)'
+                  : '🧪 NEED NECTAR')
+              : '🧪 LOCKED — GIFT TO REACH ★',
+          color: const Color(0xFF8CFF98),
+          onTap: tier >= 1 && hasNectar
+              ? () {
+                  NpcStore.nectar -= 1;
+                  NpcStore.save();
+                  Loadout.blessingRegen += 1.0;
+                  setState(() {});
+                }
+              : null,
+        );
       default:
         return null;
     }
@@ -1158,6 +1222,16 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
       label: 'kill grenadiers',
       target: 40,
       reward: '5% chance any kill drops nectar',
+    ),
+    'scribe': (
+      label: 'pick boons in runs',
+      target: 25,
+      reward: '+0.05 starting crit chance',
+    ),
+    'apothecary': (
+      label: 'pick up healing hearts',
+      target: 25,
+      reward: '+0.5 starting HP/sec regen',
     ),
   };
 
@@ -1492,6 +1566,32 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
                 top: 14,
                 right: 16,
                 child: Row(children: [
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  const RelationshipsScreen()));
+                      if (mounted) setState(_build);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xCC1F1D2E),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFF8AB4)),
+                      ),
+                      child: const Text('💞 BONDS',
+                          style: TextStyle(
+                              color: Color(0xFFFF8AB4),
+                              fontWeight: FontWeight.w900,
+                              fontSize: 11,
+                              letterSpacing: 1)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
                   Text('🍯 ${NpcStore.nectar}',
                       style: const TextStyle(
                           color: Color(0xFFFFD45E),
@@ -1703,6 +1803,155 @@ class _HomeScreenState extends State<HomeScreen> {
 /// ---------------------------------------------------------------------------
 /// Character select
 /// ---------------------------------------------------------------------------
+class RelationshipsScreen extends StatelessWidget {
+  const RelationshipsScreen({super.key});
+
+  // Catalog every NPC in the house plus the rescuables. Locked-out
+  // rescuables show as silhouettes so the player has something to chase.
+  static const _entries = [
+    (
+      id: 'hypnos',
+      name: 'HYPNOS',
+      icon: '😴',
+      role: 'GREETER',
+      color: Color(0xFFFFD45E),
+      rescuable: false,
+    ),
+    (
+      id: 'achilles',
+      name: 'ACHILLES',
+      icon: '🛡',
+      role: 'MENTOR',
+      color: Color(0xFF8CC8FF),
+      rescuable: false,
+    ),
+    (
+      id: 'dusa',
+      name: 'DUSA',
+      icon: '👁',
+      role: 'ATTENDANT',
+      color: Color(0xFF9B5CFF),
+      rescuable: false,
+    ),
+    (
+      id: 'smith',
+      name: 'THE SMITH',
+      icon: '🔨',
+      role: 'BLACKSMITH',
+      color: Color(0xFFFFB347),
+      rescuable: true,
+    ),
+    (
+      id: 'chef',
+      name: 'THE CHEF',
+      icon: '🍞',
+      role: 'COOK',
+      color: Color(0xFFB6FFC0),
+      rescuable: true,
+    ),
+    (
+      id: 'scribe',
+      name: 'THE SCRIBE',
+      icon: '📜',
+      role: 'CODEX-KEEPER',
+      color: Color(0xFF8CC8FF),
+      rescuable: true,
+    ),
+    (
+      id: 'apothecary',
+      name: 'THE APOTHECARY',
+      icon: '🧪',
+      role: 'HEALER',
+      color: Color(0xFF8CFF98),
+      rescuable: true,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('BONDS · RELATIONSHIPS')),
+      body: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: _entries.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        itemBuilder: (_, i) {
+          final e = _entries[i];
+          final rescued =
+              !e.rescuable || NpcStore.rescued.contains(e.id);
+          final tier = NpcStore.tierOf(e.id);
+          final aff = NpcStore.affOf(e.id);
+          final qDone = NpcStore.questDone.contains(e.id);
+          return Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1F1D2E),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                  color: rescued ? e.color : Colors.white12,
+                  width: rescued ? 1.4 : 1),
+            ),
+            child: Row(children: [
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: rescued
+                      ? e.color.withValues(alpha: 0.2)
+                      : Colors.white12,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: rescued ? e.color : Colors.white24),
+                ),
+                child: Text(rescued ? e.icon : '?',
+                    style: const TextStyle(
+                        fontSize: 22, fontFamily: 'NotoEmoji')),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(rescued ? e.name : '???',
+                        style: TextStyle(
+                            color: rescued
+                                ? Colors.white
+                                : Colors.white38,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 15)),
+                    Text(rescued ? e.role : 'captive — find them in a run',
+                        style: TextStyle(
+                            color: rescued
+                                ? e.color
+                                : Colors.white38,
+                            fontSize: 11,
+                            letterSpacing: 1)),
+                    if (rescued) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                          'friendship ${'★' * tier}${'☆' * (3 - tier)} ($aff)',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 11)),
+                      if (qDone)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 2),
+                          child: Text('✓ quest claimed',
+                              style: TextStyle(
+                                  color: Color(0xFF8CFF98), fontSize: 10)),
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class BestiaryScreen extends StatelessWidget {
   const BestiaryScreen({super.key});
 
@@ -2230,7 +2479,9 @@ class Player {
         fireInterval = def.fireInterval,
         projSpeed = def.projSpeed,
         range = def.range,
-        critChance = def.critChance + MetaStore.lvlOf('crit') * 0.03,
+        critChance = def.critChance +
+            MetaStore.lvlOf('crit') * 0.03 +
+            (NpcStore.questDone.contains('scribe') ? 0.05 : 0),
         projectiles = def.projectiles,
         lifesteal = def.lifesteal + MetaStore.lvlOf('life') * 0.1,
         splash = def.splash + MetaStore.lvlOf('splash') * 6,
@@ -2276,7 +2527,7 @@ class Player {
   double doomAmt = 0; // Ares delayed burst
 
   double fireTimer = 0;
-  double regen = 0;
+  double regen = NpcStore.questDone.contains('apothecary') ? 0.5 : 0;
   double hurtFlash = 0;
   double frostT = 0; // movement-slow timer applied by FROST enemies
   bool frostImmune = false;
@@ -2546,7 +2797,15 @@ const List<Achievement> kAchievements = [
 /// rescued from the dungeon, and the player's stash of NECTAR (the gift
 /// currency). Loaded once at boot, written through after every mutation.
 class NpcStore {
-  static const _npcIds = ['hypnos', 'achilles', 'dusa', 'smith', 'chef'];
+  static const _npcIds = [
+    'hypnos',
+    'achilles',
+    'dusa',
+    'smith',
+    'chef',
+    'scribe',
+    'apothecary',
+  ];
 
   // ids that the player has freed during runs; they appear in home after.
   static Set<String> rescued = {};
@@ -2927,7 +3186,7 @@ class _GameScreenState extends State<GameScreen>
     // Rare rescue event: tucked-away captive in a far room. We pick from
     // the unrescued candidates so each run can save at most one new NPC.
     if (!_bossWave && _floorIdx >= 1) {
-      const rescuables = ['smith', 'chef'];
+      const rescuables = ['smith', 'chef', 'scribe', 'apothecary'];
       final candidates = rescuables
           .where((id) => !NpcStore.rescued.contains(id))
           .toList();
@@ -2969,6 +3228,14 @@ class _GameScreenState extends State<GameScreen>
     if (Loadout.blessingMpRegen > 0) {
       _p.mpRegen += Loadout.blessingMpRegen;
       Loadout.blessingMpRegen = 0;
+    }
+    if (Loadout.blessingCritChance > 0) {
+      _p.critChance += Loadout.blessingCritChance;
+      Loadout.blessingCritChance = 0;
+    }
+    if (Loadout.blessingRegen > 0) {
+      _p.regen += Loadout.blessingRegen;
+      Loadout.blessingRegen = 0;
     }
     // Chef's bonus is read live during the run (nectar drop chance) and
     // zeroed at game-over so it only buffs the run it was set for.
@@ -3188,6 +3455,7 @@ class _GameScreenState extends State<GameScreen>
       if (h.life <= 0) return true;
       if ((h.pos - _p.pos).distance < _p.radius + 11) {
         _p.hp = (_p.hp + 6).clamp(0, _p.maxHp).toDouble();
+        NpcStore.bumpQuest('apothecary', 1);
         _texts.add(FloatText(
             _p.pos.translate(0, -22), '+6', const Color(0xFFFF6B79)));
         Sfx.play('pickup', vol: 0.7, pitch: 1.2);
@@ -4262,6 +4530,7 @@ class _GameScreenState extends State<GameScreen>
 
   void _pickUpgrade(Upgrade u) {
     u.apply(_p);
+    NpcStore.bumpQuest('scribe', 1);
     _texts.add(FloatText(_p.pos.translate(0, -_p.radius - 14), u.title,
         const Color(0xFF8CFF98)));
     if (_p.xp >= _p.xpToNext) {
