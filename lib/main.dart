@@ -2797,8 +2797,10 @@ class _HeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       borderRadius: BorderRadius.circular(18),
-      onTap: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => KeepsakeScreen(def: def))),
+      onTap: () => Navigator.of(context).pushReplacement(
+          // Keepsake + weapon are already set at the home stands, so we
+          // skip the legacy per-run KeepsakeScreen step and go straight in.
+          MaterialPageRoute<void>(builder: (_) => GameScreen(def: def))),
       child: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -2905,77 +2907,6 @@ class _HeroCard extends StatelessWidget {
                 fontWeight: FontWeight.w900,
                 fontSize: 11)),
       ]),
-    );
-  }
-}
-
-/// ---------------------------------------------------------------------------
-/// Keepsake select
-/// ---------------------------------------------------------------------------
-class KeepsakeScreen extends StatelessWidget {
-  const KeepsakeScreen({super.key, required this.def});
-  final HeroDef def;
-
-  @override
-  Widget build(BuildContext context) {
-    void go() => Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => GameScreen(def: def)));
-    return Scaffold(
-      appBar: AppBar(title: const Text('EQUIP A KEEPSAKE')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: () {
-              Loadout.keepsake = null;
-              go();
-            },
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1F1D2E),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: const Text('NO KEEPSAKE',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w900, color: Colors.white)),
-            ),
-          ),
-          for (final k in availableKeepsakes())
-            InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: () {
-                Loadout.keepsake = k;
-                go();
-              },
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                margin: const EdgeInsets.only(bottom: 10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1F1D2E),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFF8CC8FF)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(k.name,
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFF8CC8FF))),
-                    Text(k.desc,
-                        style: const TextStyle(
-                            color: Colors.white60, fontSize: 12)),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
     );
   }
 }
@@ -5171,6 +5102,11 @@ class _GameScreenState extends State<GameScreen>
   }
 
   void _roomEnd() {
+    // Sweep any in-flight projectiles + airborne grenades so they don't
+    // hover frozen on the cleared room while doors open.
+    _bolts.clear();
+    _ebolts.clear();
+    _grenades.clear();
     if (_roomKind == RoomKind.challenge) {
       _p.obols += 50 + _floorIdx * 12;
       _p.hp =
@@ -7477,9 +7413,31 @@ class WorldPainter extends CustomPainter {
 
   void _paintDoorsOverlay(Canvas canvas) {
     if (doors.isEmpty) return;
+    final m = map;
     for (final d in doors) {
       _projAt(canvas, d.pos, 0, () {
         final pulse = 0.5 + 0.5 * sin(time * 4 + d.pos.dx);
+        // Bright "step here" pad drawn on the exact floor tile underneath
+        // the portal, so the player can read which iso square to stand on
+        // to enter. Pulses gently to draw the eye.
+        if (m != null) {
+          final cell = m.cell;
+          final c = (d.pos.dx / cell).floor();
+          final r = (d.pos.dy / cell).floor();
+          final pad = _tilePath(cell, c, r);
+          canvas.drawPath(
+              pad,
+              Paint()
+                ..color = const Color(0xFFFFD45E)
+                    .withValues(alpha: 0.18 + 0.12 * pulse));
+          canvas.drawPath(
+              pad,
+              Paint()
+                ..color = const Color(0xFFFFD45E)
+                    .withValues(alpha: 0.85)
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 2);
+        }
         canvas.drawCircle(d.pos, d.r + 12,
             Paint()..color = const Color(0xFFFFD45E).withValues(alpha: 0.2));
         final arch = RRect.fromRectAndRadius(
