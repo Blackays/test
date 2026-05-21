@@ -3625,6 +3625,11 @@ class _GameScreenState extends State<GameScreen>
   String? _floorIntro;
   double _floorIntroT = 0;
   int _lastIntroFloor = -1;
+  // Run-scoped trackers, reset at _initRun and read on the end overlay.
+  final List<String> _runBoons = [];
+  double _runTime = 0;
+  int _runMaxCombo = 0;
+  int _runStartNectar = 0;
   // Whichever enemy the auto-aim is locked onto this frame — drawn with a
   // subtle ring so the player can read where their next shot is going.
   Enemy? _aimAt;
@@ -3854,6 +3859,10 @@ class _GameScreenState extends State<GameScreen>
     _wave = 1;
     _entryCorner = 2 + _rng.nextInt(2); // either lower-left or lower-right
     _lastIntroFloor = -1; // force the F1 banner on the first room of a run
+    _runBoons.clear();
+    _runTime = 0;
+    _runMaxCombo = 0;
+    _runStartNectar = NpcStore.nectar;
     NpcStore.smithUsedThisRun = false;
     _shake = 0;
     _combo = 0;
@@ -3887,6 +3896,7 @@ class _GameScreenState extends State<GameScreen>
       _freezeT -= dt;
       dt = 0;
     }
+    if (_phase == Phase.playing) _runTime += dt;
     if (_phase == Phase.playing || _phase == Phase.roomCleared) _update(dt);
     setState(() {});
   }
@@ -4560,6 +4570,7 @@ class _GameScreenState extends State<GameScreen>
         }
         if (e.kind == 9) NpcStore.bumpQuest('chef', 1);
         if (_combo > GameStats.bestCombo) GameStats.bestCombo = _combo;
+        if (_combo > _runMaxCombo) _runMaxCombo = _combo;
         // Boss kills can drop a healing heart for the player.
         if (e.kind == 3) {
           _hearts.add(Heart(e.pos));
@@ -5142,6 +5153,7 @@ class _GameScreenState extends State<GameScreen>
 
   void _pickUpgrade(Upgrade u) {
     u.apply(_p);
+    _runBoons.add(u.title);
     NpcStore.bumpQuest('scribe', 1);
     _texts.add(FloatText(_p.pos.translate(0, -_p.radius - 14), u.title,
         const Color(0xFF8CFF98)));
@@ -5606,6 +5618,7 @@ class _GameScreenState extends State<GameScreen>
                 ),
                 if (_ready) _hud(),
                 if (_ready && _combo > 1) _comboBadge(),
+                if (_ready && _runBoons.isNotEmpty) _runBoonsStrip(),
                 if (_ready) _bossBar(),
                 if (_ready && _bossIntroT > 0 && _bossIntro != null)
                   _bossIntroOverlay(),
@@ -5969,6 +5982,60 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
+  // Small chip strip on the bottom-left: shows acquired-boon count plus
+  // the short codes of the latest picks so the player can see their build
+  // shaping up without opening a menu.
+  Widget _runBoonsStrip() {
+    final tail = _runBoons.length <= 4
+        ? _runBoons
+        : _runBoons.sublist(_runBoons.length - 4);
+    return Positioned(
+      left: 10,
+      bottom: 16,
+      child: IgnorePointer(
+        ignoring: true,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xCC14131F),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+                color: const Color(0xFF8CFF98).withValues(alpha: 0.5),
+                width: 1),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('✦ ${_runBoons.length}',
+                style: const TextStyle(
+                    color: Color(0xFF8CFF98),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 11)),
+            const SizedBox(width: 6),
+            for (final b in tail)
+              Padding(
+                padding: const EdgeInsets.only(left: 3),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1F1D2E),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                      // Show only the first word so the strip stays tight.
+                      b.split(' ').first,
+                      style: const TextStyle(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 9,
+                          letterSpacing: 0.5)),
+                ),
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Widget _comboBadge() {
     final tier = _combo >= 25 ? 2 : (_combo >= 10 ? 1 : 0);
     final color = tier == 2
@@ -6262,6 +6329,15 @@ class _GameScreenState extends State<GameScreen>
   }
 
   Widget _endOverlay(bool win) {
+    final mins = (_runTime / 60).floor();
+    final secs = (_runTime % 60).floor();
+    final nectarGained = NpcStore.nectar - _runStartNectar;
+    final beatBest = _wave > GameStats.bestWave ||
+        (_floorIdx + 1) > GameStats.bestFloor;
+    final boonsByTitle = <String, int>{};
+    for (final t in _runBoons) {
+      boonsByTitle[t] = (boonsByTitle[t] ?? 0) + 1;
+    }
     return _scrim(Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -6273,33 +6349,90 @@ class _GameScreenState extends State<GameScreen>
                 color: win
                     ? const Color(0xFF8CFF98)
                     : const Color(0xFFFF5C6C))),
-        const SizedBox(height: 10),
-        Text(
-            'floor ${_floorIdx + 1} · room $_wave · '
-            'lv ${_p.level} · ${_p.kills} kills',
-            style: const TextStyle(color: Colors.white70)),
-        const SizedBox(height: 6),
-        Text('🔷 +$_lastGain shards  (total ${MetaStore.shards})',
-            style: const TextStyle(
-                color: Color(0xFF8CC8FF), fontWeight: FontWeight.w900)),
+        if (beatBest)
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text('NEW BEST!',
+                style: TextStyle(
+                    color: Color(0xFFFFD45E),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 3,
+                    fontSize: 12)),
+          ),
         const SizedBox(height: 14),
-        // Personal bests + lifetime totals (persisted across runs).
+        Container(
+          width: 320,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xCC1F1D2E),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFFFD45E)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _recapRow('FLOOR', '${_floorIdx + 1} · ${_floor.name}',
+                const Color(0xFFFFD45E)),
+            _recapRow('ROOM', '$_wave / $kMaxWaves', Colors.white),
+            _recapRow('LEVEL', '${_p.level}', Colors.white),
+            _recapRow('KILLS', '${_p.kills}', Colors.white),
+            _recapRow('MAX COMBO', 'x$_runMaxCombo',
+                const Color(0xFFFF9A3C)),
+            _recapRow('TIME ALIVE',
+                '${mins}m ${secs.toString().padLeft(2, '0')}s',
+                Colors.white70),
+            _recapRow('WEAPON', _p.weapon.name, const Color(0xFFFFB347)),
+            const Divider(color: Colors.white24, height: 18),
+            _recapRow('🔷 SHARDS', '+$_lastGain',
+                const Color(0xFF8CC8FF)),
+            if (nectarGained > 0)
+              _recapRow('🍯 NECTAR', '+$nectarGained',
+                  const Color(0xFFFFD45E)),
+            _recapRow('💰 OBOLS', '${_p.obols}',
+                const Color(0xFFFFD45E)),
+            if (boonsByTitle.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text('BOONS PICKED (${_runBoons.length})',
+                  style: const TextStyle(
+                      color: Color(0xFF8CFF98),
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.5,
+                      fontSize: 10)),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (final entry in boonsByTitle.entries)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF14131F),
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(
+                            color: const Color(0xFF8CFF98), width: 0.8),
+                      ),
+                      child: Text(
+                          entry.value > 1
+                              ? '${entry.key} x${entry.value}'
+                              : entry.key,
+                          style: const TextStyle(
+                              color: Color(0xFF8CFF98), fontSize: 10)),
+                    ),
+                ],
+              ),
+            ],
+          ]),
+        ),
+        const SizedBox(height: 14),
         Text(
-            'BEST: floor ${GameStats.bestFloor} · '
-            'room ${GameStats.bestWave}',
-            style: const TextStyle(
-                color: Color(0xFFFFD45E), fontWeight: FontWeight.w900)),
-        Text(
-            '${GameStats.totalRuns} runs · '
-            '${GameStats.totalKills} kills · '
-            '${GameStats.totalObols} 💰 collected',
-            style: const TextStyle(color: Colors.white54, fontSize: 12)),
-        const SizedBox(height: 18),
+            'lifetime: ${GameStats.totalRuns} runs · ${GameStats.totalKills} kills',
+            style: const TextStyle(color: Colors.white38, fontSize: 11)),
+        const SizedBox(height: 14),
         _BigButton(
             label: 'PLAY AGAIN',
             color: const Color(0xFFFFD45E),
             onTap: () => setState(_initRun)),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         _BigButton(
           label: 'BACK HOME',
           color: const Color(0xFF8CC8FF),
@@ -6310,6 +6443,25 @@ class _GameScreenState extends State<GameScreen>
         ),
       ],
     ));
+  }
+
+  Widget _recapRow(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 10,
+                  letterSpacing: 1.6)),
+          Text(value,
+              style: TextStyle(
+                  color: color, fontWeight: FontWeight.w900, fontSize: 13)),
+        ],
+      ),
+    );
   }
 }
 
