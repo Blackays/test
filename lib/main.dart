@@ -222,8 +222,12 @@ class Loadout {
   // If set, the next run uses this RNG seed and records its score under
   // `dailyKey()` so each day's seed has a personal best.
   static int? dailySeed;
-  // Smith's blessing — extra damage applied at run start, consumed on use.
-  static int blessingDmg = 0;
+  // NPC blessings — set in the home, applied + consumed at run start.
+  static int blessingDmg = 0; // Smith: +damage
+  static int blessingHp = 0; // Hypnos: +max HP
+  static int blessingRevives = 0; // Achilles: +revives
+  static double blessingMpRegen = 0; // Dusa: +MP/sec
+  static double blessingNectarBonus = 0; // Chef: extra nectar drop chance
   static String? dailyKey; // YYYYMMDD format
 
   static String todayKey() {
@@ -927,6 +931,20 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
               "ask, and i'll work the steel. that's the deal.",
             ],
           ),
+        if (NpcStore.rescued.contains('chef'))
+          HomeNpc(
+            id: 'chef',
+            pos: Offset((lcx + 1.4) * cell, 5.4 * cell),
+            name: 'THE CHEF',
+            icon: '🍞',
+            color: const Color(0xFFB6FFC0),
+            lines: const [
+              "you saved me from that cell. i bake for free now.",
+              "a small loaf, before you go? it's still warm.",
+              "i pickle nectar bottles too. you'll find more on your travels.",
+              "everything tastes better with a sharp edge — go see the smith.",
+            ],
+          ),
       ]);
     for (final n in _npcs) {
       n.lineIdx = _rng.nextInt(n.lines.length);
@@ -936,12 +954,12 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
   }
 
   // Bottom-center stack of NPC actions: appears while the player is standing
-  // next to an NPC. Each button is enabled only if its preconditions hold.
+  // next to an NPC. Each NPC has a gift button and (at ★+ affinity) their
+  // own per-run blessing service.
   Widget _npcActionPanel() {
     final npc = _talking!;
     final tier = NpcStore.tierOf(npc.id);
     final hasNectar = NpcStore.nectar > 0;
-    final canBless = npc.id == 'smith' && tier >= 1 && hasNectar;
 
     Widget button(String label, Color color, VoidCallback? onTap) {
       final enabled = onTap != null;
@@ -969,6 +987,10 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
       );
     }
 
+    // Each NPC's blessing service: label, color, predicate, side-effect.
+    final blessing = _blessingFor(npc.id, tier, hasNectar);
+    final pendingNote = _pendingBlessingNote();
+
     return Positioned(
       bottom: 64,
       left: 0,
@@ -992,41 +1014,135 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
               hasNectar
                   ? () {
                       NpcStore.gift(npc.id);
-                      // Switch line so the NPC reacts to the gift.
                       npc.lineIdx = (npc.lineIdx + 1) % npc.lines.length;
                       setState(() {});
                     }
                   : null,
             ),
-            if (npc.id == 'smith') ...[
+            if (blessing != null) ...[
               const SizedBox(width: 10),
-              button(
-                  canBless
-                      ? '🔨 BLESS WEAPON +1 DMG (1🍯)'
-                      : (tier >= 1
-                          ? '🔨 NEED NECTAR'
-                          : '🔨 LOCKED — GIFT TO REACH ★'),
-                  const Color(0xFFFFB347),
-                  canBless
-                      ? () {
-                          NpcStore.nectar -= 1;
-                          NpcStore.save();
-                          Loadout.blessingDmg += 1;
-                          setState(() {});
-                        }
-                      : null),
+              button(blessing.label, blessing.color, blessing.onTap),
             ],
           ]),
-          if (npc.id == 'smith' && Loadout.blessingDmg > 0)
+          if (pendingNote != null)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text('next run: +${Loadout.blessingDmg} dmg blessed',
+              child: Text(pendingNote,
                   style: const TextStyle(
-                      color: Color(0xFFFFB347), fontSize: 10)),
+                      color: Color(0xFFFFD45E), fontSize: 10)),
             ),
         ]),
       ),
     );
+  }
+
+  _NpcBlessing? _blessingFor(String id, int tier, bool hasNectar) {
+    switch (id) {
+      case 'smith':
+        return _NpcBlessing(
+          label: tier >= 1
+              ? (hasNectar
+                  ? '🔨 BLESS WEAPON +1 DMG (1🍯)'
+                  : '🔨 NEED NECTAR')
+              : '🔨 LOCKED — GIFT TO REACH ★',
+          color: const Color(0xFFFFB347),
+          onTap: tier >= 1 && hasNectar
+              ? () {
+                  NpcStore.nectar -= 1;
+                  NpcStore.save();
+                  Loadout.blessingDmg += 1;
+                  setState(() {});
+                }
+              : null,
+        );
+      case 'hypnos':
+        return _NpcBlessing(
+          label: tier >= 1
+              ? (hasNectar
+                  ? '💤 SLEEP CHARM +5 MAX HP (1🍯)'
+                  : '💤 NEED NECTAR')
+              : '💤 LOCKED — GIFT TO REACH ★',
+          color: const Color(0xFFFFD45E),
+          onTap: tier >= 1 && hasNectar
+              ? () {
+                  NpcStore.nectar -= 1;
+                  NpcStore.save();
+                  Loadout.blessingHp += 5;
+                  setState(() {});
+                }
+              : null,
+        );
+      case 'achilles':
+        return _NpcBlessing(
+          label: tier >= 1
+              ? (hasNectar
+                  ? '🛡 DRILL +1 REVIVE (1🍯)'
+                  : '🛡 NEED NECTAR')
+              : '🛡 LOCKED — GIFT TO REACH ★',
+          color: const Color(0xFF8CC8FF),
+          onTap: tier >= 1 && hasNectar
+              ? () {
+                  NpcStore.nectar -= 1;
+                  NpcStore.save();
+                  Loadout.blessingRevives += 1;
+                  setState(() {});
+                }
+              : null,
+        );
+      case 'dusa':
+        return _NpcBlessing(
+          label: tier >= 1
+              ? (hasNectar
+                  ? '✨ POLISH +1 MP/SEC (1🍯)'
+                  : '✨ NEED NECTAR')
+              : '✨ LOCKED — GIFT TO REACH ★',
+          color: const Color(0xFF9B5CFF),
+          onTap: tier >= 1 && hasNectar
+              ? () {
+                  NpcStore.nectar -= 1;
+                  NpcStore.save();
+                  Loadout.blessingMpRegen += 1.0;
+                  setState(() {});
+                }
+              : null,
+        );
+      case 'chef':
+        return _NpcBlessing(
+          label: tier >= 1
+              ? (hasNectar
+                  ? '🍞 MEAL +25% NECTAR DROPS (1🍯)'
+                  : '🍞 NEED NECTAR')
+              : '🍞 LOCKED — GIFT TO REACH ★',
+          color: const Color(0xFFB6FFC0),
+          onTap: tier >= 1 && hasNectar
+              ? () {
+                  NpcStore.nectar -= 1;
+                  NpcStore.save();
+                  Loadout.blessingNectarBonus += 0.25;
+                  setState(() {});
+                }
+              : null,
+        );
+      default:
+        return null;
+    }
+  }
+
+  // Summary line so the player sees what's stacked on the next run.
+  String? _pendingBlessingNote() {
+    final parts = <String>[];
+    if (Loadout.blessingDmg > 0) parts.add('+${Loadout.blessingDmg} dmg');
+    if (Loadout.blessingHp > 0) parts.add('+${Loadout.blessingHp} max HP');
+    if (Loadout.blessingRevives > 0) {
+      parts.add('+${Loadout.blessingRevives} revive');
+    }
+    if (Loadout.blessingMpRegen > 0) {
+      parts.add('+${Loadout.blessingMpRegen.toStringAsFixed(1)} MP/s');
+    }
+    if (Loadout.blessingNectarBonus > 0) {
+      parts.add('+${(Loadout.blessingNectarBonus * 100).round()}% nectar');
+    }
+    return parts.isEmpty ? null : 'next run blessings: ${parts.join(' · ')}';
   }
 
   // The greeter's lines fold in the player's lifetime run count so each
@@ -2237,9 +2353,9 @@ class Ballista {
   double timer = 0;
 }
 
-enum DoorKind { reward, boon, shop, treasure, challenge, shrine }
+enum DoorKind { reward, boon, shop, treasure, challenge, shrine, respite }
 
-enum RoomKind { normal, treasure, challenge, shrine }
+enum RoomKind { normal, treasure, challenge, shrine, respite }
 
 class DoorDef {
   DoorDef(this.icon, this.title, this.desc, this.kind, this.apply);
@@ -2312,7 +2428,7 @@ const List<Achievement> kAchievements = [
 /// rescued from the dungeon, and the player's stash of NECTAR (the gift
 /// currency). Loaded once at boot, written through after every mutation.
 class NpcStore {
-  static const _npcIds = ['hypnos', 'achilles', 'dusa', 'smith'];
+  static const _npcIds = ['hypnos', 'achilles', 'dusa', 'smith', 'chef'];
 
   // ids that the player has freed during runs; they appear in home after.
   static Set<String> rescued = {};
@@ -2596,6 +2712,7 @@ class _GameScreenState extends State<GameScreen>
     if (_roomKind == RoomKind.treasure) spawn = 0;
     if (_roomKind == RoomKind.challenge) spawn = (spawn * 1.6).round();
     if (_roomKind == RoomKind.shrine) spawn = 0;
+    if (_roomKind == RoomKind.respite) spawn = 0;
     _toSpawn = spawn;
 
     // Treasure rooms: drop a pile of obol orbs by the entry.
@@ -2613,6 +2730,21 @@ class _GameScreenState extends State<GameScreen>
     if (_roomKind == RoomKind.challenge) {
       _texts.add(FloatText(_p.pos.translate(0, -32), 'CHALLENGE!',
           const Color(0xFFFF9A3C)));
+    }
+    if (_roomKind == RoomKind.respite) {
+      // Wayhouse: drop a single visitor at the map center. Walking up to
+      // them grants a small free buff and a nectar bottle.
+      final centerRoom = _map.rooms[_map.rooms.length ~/ 2];
+      final vp = Offset(
+          (centerRoom.left + centerRoom.width / 2) * _map.cell,
+          (centerRoom.top + centerRoom.height / 2) * _map.cell);
+      _map.clearDisk(vp.dx, vp.dy, 2.0);
+      final pick =
+          ['eurydice', 'patroclus', 'sisyphus'][_rng.nextInt(3)];
+      final id = 'respite_$pick';
+      _captives.add(Captive(vp, id));
+      _texts.add(FloatText(vp.translate(0, -32),
+          'A QUIET VISITOR', const Color(0xFFB6FFC0)));
     }
 
     // traps: visible, sparse, away from the entry
@@ -2652,23 +2784,23 @@ class _GameScreenState extends State<GameScreen>
       }
     }
 
-    // Rare rescue event: tucked-away captive in a far room. Each unreached
-    // NPC has a chance to seed at most once per run; floors gate eligibility.
+    // Rare rescue event: tucked-away captive in a far room. We pick from
+    // the unrescued candidates so each run can save at most one new NPC.
     if (!_bossWave && _floorIdx >= 1) {
-      final candidates = <String>[];
-      if (!NpcStore.rescued.contains('smith')) candidates.add('smith');
-      for (final id in candidates) {
-        if (_rng.nextDouble() < 0.06 + _floorIdx * 0.025) {
-          // Place in a back room, away from the player's entry corner.
-          final back = _cornerCell(_exitCorner, _floorBounds()!);
-          final cell = _map.cell;
-          final pos = Offset((back.$1 + 0.5) * cell, (back.$2 + 0.5) * cell);
-          _map.clearDisk(pos.dx, pos.dy, 2.0);
-          _captives.add(Captive(pos, id));
-          _texts.add(FloatText(pos.translate(0, -32),
-              'CAPTIVE — clear the room', const Color(0xFFFFD45E)));
-          break;
-        }
+      const rescuables = ['smith', 'chef'];
+      final candidates = rescuables
+          .where((id) => !NpcStore.rescued.contains(id))
+          .toList();
+      if (candidates.isNotEmpty &&
+          _rng.nextDouble() < 0.06 + _floorIdx * 0.025) {
+        final id = candidates[_rng.nextInt(candidates.length)];
+        final back = _cornerCell(_exitCorner, _floorBounds()!);
+        final cell = _map.cell;
+        final pos = Offset((back.$1 + 0.5) * cell, (back.$2 + 0.5) * cell);
+        _map.clearDisk(pos.dx, pos.dy, 2.0);
+        _captives.add(Captive(pos, id));
+        _texts.add(FloatText(pos.translate(0, -32),
+            'CAPTIVE — clear the room', const Color(0xFFFFD45E)));
       }
     }
   }
@@ -2683,8 +2815,23 @@ class _GameScreenState extends State<GameScreen>
     Loadout.keepsake?.apply(_p);
     if (Loadout.blessingDmg > 0) {
       _p.damage += Loadout.blessingDmg;
-      Loadout.blessingDmg = 0; // consumed at the start of the run
+      Loadout.blessingDmg = 0;
     }
+    if (Loadout.blessingHp > 0) {
+      _p.maxHp += Loadout.blessingHp.toDouble();
+      _p.hp += Loadout.blessingHp.toDouble();
+      Loadout.blessingHp = 0;
+    }
+    if (Loadout.blessingRevives > 0) {
+      _p.revives += Loadout.blessingRevives;
+      Loadout.blessingRevives = 0;
+    }
+    if (Loadout.blessingMpRegen > 0) {
+      _p.mpRegen += Loadout.blessingMpRegen;
+      Loadout.blessingMpRegen = 0;
+    }
+    // Chef's bonus is read live during the run (nectar drop chance) and
+    // zeroed at game-over so it only buffs the run it was set for.
     _wave = 1;
     _entryCorner = 2 + _rng.nextInt(2); // either lower-left or lower-right
     _lastIntroFloor = -1; // force the F1 banner on the first room of a run
@@ -2930,18 +3077,33 @@ class _GameScreenState extends State<GameScreen>
       return false;
     });
 
-    // Captive NPCs: walk over them after the room is clear to free them.
+    // Captives + respite visitors share the same entity. The npcId prefix
+    // decides: 'respite_*' grants a one-shot heal + nectar; anything else
+    // is a permanent NPC rescue that persists to the home.
     for (final c in _captives) {
       c.bob += dt;
       if (c.freed) continue;
       if ((c.pos - _p.pos).distance < _p.radius + 22 &&
           _enemies.isEmpty) {
         c.freed = true;
-        NpcStore.rescue(c.npcId);
         Sfx.play('pickup', vol: 0.95, pitch: 1.0);
         _shake = max(_shake, 4.0);
-        _toasts.add(Toast('★ FREED THE ${c.npcId.toUpperCase()}',
-            'they are heading to your home', const Color(0xFFFFD45E)));
+        if (c.npcId.startsWith('respite_')) {
+          final visitor = c.npcId.substring('respite_'.length).toUpperCase();
+          _p.hp = (_p.hp + _p.maxHp * 0.35).clamp(0, _p.maxHp).toDouble();
+          NpcStore.nectar += 1;
+          NpcStore.save();
+          _toasts.add(Toast(
+              '🍞 $visitor SHARED A MEAL',
+              'heal · +1 nectar',
+              const Color(0xFFB6FFC0)));
+        } else {
+          NpcStore.rescue(c.npcId);
+          _toasts.add(Toast(
+              '★ FREED THE ${c.npcId.toUpperCase()}',
+              'they are heading to your home',
+              const Color(0xFFFFD45E)));
+        }
       }
     }
 
@@ -3381,7 +3543,8 @@ class _GameScreenState extends State<GameScreen>
         } else if (e.elite && _rng.nextDouble() < 0.18) {
           _hearts.add(Heart(e.pos));
         }
-        if (e.elite && _rng.nextDouble() < 0.45) {
+        if (e.elite &&
+            _rng.nextDouble() < 0.45 + Loadout.blessingNectarBonus) {
           _nectar.add(NectarDrop(e.pos));
         }
         _checkAchievements();
@@ -4024,6 +4187,9 @@ class _GameScreenState extends State<GameScreen>
           DoorKind.challenge, (_) {}),
       DoorDef('⛩', 'SHRINE', 'a blessing — at a price',
           DoorKind.shrine, (_) {}),
+      // Hidden NPC encounter — a calm room with a wandering visitor.
+      DoorDef('🏠', 'WAYHOUSE', 'a quiet visitor + small gift',
+          DoorKind.respite, (_) {}),
     ]..shuffle(_rng);
     return pool.take(n.clamp(2, pool.length).toInt()).toList();
   }
@@ -4077,6 +4243,9 @@ class _GameScreenState extends State<GameScreen>
         break;
       case DoorKind.shrine:
         _roomKind = RoomKind.shrine;
+        break;
+      case DoorKind.respite:
+        _roomKind = RoomKind.respite;
         break;
       default:
         _roomKind = RoomKind.normal;
@@ -4226,6 +4395,7 @@ class _GameScreenState extends State<GameScreen>
     _recordDailyScore();
     GameStats.recordRunEnd(_wave, _floorIdx + 1, _p.kills, _p.obols);
     _awardShards();
+    Loadout.blessingNectarBonus = 0; // chef's buff is per-run
     _phase = Phase.gameOver;
   }
 
@@ -4233,6 +4403,7 @@ class _GameScreenState extends State<GameScreen>
     _recordDailyScore();
     GameStats.recordRunEnd(_wave, _floorIdx + 1, _p.kills, _p.obols);
     _awardShards();
+    Loadout.blessingNectarBonus = 0;
     _phase = Phase.victory;
   }
 
@@ -5491,6 +5662,14 @@ void _drawProp(Canvas canvas, Offset c, double s, int kind, FloorDef f) {
       canvas.drawCircle(c.translate(s * 0.12, s * 0.04), s * 0.2,
           Paint()..color = _shd(f.prop, 0.18));
   }
+}
+
+class _NpcBlessing {
+  const _NpcBlessing(
+      {required this.label, required this.color, required this.onTap});
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
 }
 
 class HomeNpc {
