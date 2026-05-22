@@ -17,6 +17,7 @@ Future<void> main() async {
   await MetaStore.load();
   await GameStats.load();
   await NpcStore.load();
+  await Loadout.loadPact();
   await Settings.load();
   await Sfx.init();
   runApp(const BuffBattleApp());
@@ -276,7 +277,10 @@ List<Keepsake> availableKeepsakes() {
 
 class Loadout {
   static Keepsake? keepsake;
-  static int heat = 0; // Pact of Punishment-style difficulty
+  // Pact of Punishment: set of enabled modifier ids. Each costs 1 heat;
+  // heat is derived from set size and is what drives enemyMul / rewardMul.
+  static Set<String> pactIds = {};
+  static int get heat => pactIds.length;
   static double get enemyMul => 1 + heat * 0.12;
   static double get rewardMul => 1 + heat * 0.25;
   // If set, the next run uses this RNG seed and records its score under
@@ -295,6 +299,21 @@ class Loadout {
   static double blessingCritChance = 0; // Scribe: +crit chance
   static double blessingRegen = 0; // Apothecary: +HP/sec
   static String? dailyKey; // YYYYMMDD format
+
+  // Persist + restore the active Pact selection alongside MetaStore.
+  static Future<void> loadPact() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      pactIds = (p.getStringList('bb_pact') ?? const <String>[]).toSet();
+    } catch (_) {}
+  }
+
+  static Future<void> savePact() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setStringList('bb_pact', pactIds.toList());
+    } catch (_) {}
+  }
 
   static String todayKey() {
     final d = DateTime.now();
@@ -1707,35 +1726,28 @@ class _HomeRoomScreenState extends State<HomeRoomScreen>
               Positioned(
                 bottom: 16,
                 right: 16,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xCC14131F),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFFF8A4C)),
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    InkWell(
-                      onTap: () => setState(() => Loadout.heat =
-                          (Loadout.heat - 1).clamp(0, 10).toInt()),
-                      child: const Icon(Icons.remove,
-                          size: 18, color: Colors.white70),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () async {
+                    await Navigator.of(context).push(MaterialPageRoute<void>(
+                        builder: (_) => const PactOfPunishmentScreen()));
+                    if (mounted) setState(() {});
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xCC14131F),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFFF8A4C)),
                     ),
-                    const SizedBox(width: 8),
-                    Text('🔥 HEAT ${Loadout.heat}',
+                    child: Text(
+                        '🔥 PACT · HEAT ${Loadout.heat}  ·  enemies ×${Loadout.enemyMul.toStringAsFixed(2)}',
                         style: const TextStyle(
                             color: Color(0xFFFF8A4C),
                             fontWeight: FontWeight.w900,
                             fontSize: 12)),
-                    const SizedBox(width: 8),
-                    InkWell(
-                      onTap: () => setState(() => Loadout.heat =
-                          (Loadout.heat + 1).clamp(0, 10).toInt()),
-                      child: const Icon(Icons.add,
-                          size: 18, color: Colors.white70),
-                    ),
-                  ]),
+                  ),
                 ),
               ),
               if (Loadout.dailyKey != null &&
@@ -2404,6 +2416,152 @@ class ArsenalScreen extends StatelessWidget {
           for (final w in kWeapons) tile(w),
         ],
       ),
+    );
+  }
+}
+
+/// One Pact of Punishment modifier. Each costs 1 heat when enabled.
+/// Effects live in check-sites scattered across the game and gate on
+/// `Loadout.pactIds.contains(id)`, so adding a new modifier means: add
+/// it here + wire its check-site.
+class PactModifier {
+  const PactModifier(this.id, this.name, this.desc);
+  final String id;
+  final String name;
+  final String desc;
+}
+
+const List<PactModifier> kPact = [
+  PactModifier('hard_labor', 'HARD LABOR', 'enemies start with +25% HP'),
+  PactModifier('jury_summons', 'JURY SUMMONS', 'enemies spawn 30% faster'),
+  PactModifier('lasting_cons', 'LASTING CONSEQUENCES',
+      'fountains heal 50% less'),
+  PactModifier('convenience_fee', 'CONVENIENCE FEE',
+      'shop prices +50%'),
+  PactModifier('routine_insp', 'ROUTINE INSPECTION',
+      'boss telegraphs 40% faster'),
+  PactModifier('bursting_wrath', 'BURSTING WRATH',
+      'kamikaze AoE +50% damage'),
+  PactModifier('tight_deadline', 'TIGHT DEADLINE',
+      'start every run with -10% max HP'),
+  PactModifier('approval_proc', 'APPROVAL PROCESS',
+      'level-up offers only 2 boons, not 3'),
+];
+
+PactModifier? pactById(String id) {
+  for (final m in kPact) {
+    if (m.id == id) return m;
+  }
+  return null;
+}
+
+bool pactOn(String id) => Loadout.pactIds.contains(id);
+
+class PactOfPunishmentScreen extends StatefulWidget {
+  const PactOfPunishmentScreen({super.key});
+  @override
+  State<PactOfPunishmentScreen> createState() =>
+      _PactOfPunishmentScreenState();
+}
+
+class _PactOfPunishmentScreenState extends State<PactOfPunishmentScreen> {
+  @override
+  void dispose() {
+    Loadout.savePact();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('PACT OF PUNISHMENT')),
+      body: Column(children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          color: const Color(0xFF1F1D2E),
+          child: Column(children: [
+            Text('🔥 HEAT ${Loadout.heat}',
+                style: const TextStyle(
+                    color: Color(0xFFFF8A4C),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 18)),
+            const SizedBox(height: 2),
+            Text(
+                'enemies ×${Loadout.enemyMul.toStringAsFixed(2)}  ·  '
+                'shards ×${Loadout.rewardMul.toStringAsFixed(2)}',
+                style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            const SizedBox(height: 2),
+            const Text(
+                'each modifier adds 1 heat. enemies hit harder, but you earn more.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white38, fontSize: 10)),
+          ]),
+        ),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.all(14),
+            itemCount: kPact.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (_, i) {
+              final m = kPact[i];
+              final on = pactOn(m.id);
+              return InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () {
+                  setState(() {
+                    if (on) {
+                      Loadout.pactIds.remove(m.id);
+                    } else {
+                      Loadout.pactIds.add(m.id);
+                    }
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1F1D2E),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: on
+                            ? const Color(0xFFFF8A4C)
+                            : Colors.white24),
+                  ),
+                  child: Row(children: [
+                    Icon(on ? Icons.check_box : Icons.check_box_outline_blank,
+                        color: on
+                            ? const Color(0xFFFF8A4C)
+                            : Colors.white24),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(m.name,
+                              style: TextStyle(
+                                  color: on
+                                      ? const Color(0xFFFF8A4C)
+                                      : Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 14)),
+                          Text(m.desc,
+                              style: const TextStyle(
+                                  color: Colors.white70, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                    const Text('🔥 1',
+                        style: TextStyle(
+                            color: Color(0xFFFF8A4C),
+                            fontWeight: FontWeight.w900,
+                            fontSize: 12)),
+                  ]),
+                ),
+              );
+            },
+          ),
+        ),
+      ]),
     );
   }
 }
@@ -3753,6 +3911,11 @@ class _GameScreenState extends State<GameScreen>
     }
     _p = Player(widget.def);
     Loadout.keepsake?.apply(_p);
+    // PACT · TIGHT DEADLINE shaves the player's max HP before the run starts.
+    if (pactOn('tight_deadline')) {
+      _p.maxHp = (_p.maxHp * 0.9).clamp(1, 9999).toDouble();
+      _p.hp = _p.hp.clamp(1, _p.maxHp).toDouble();
+    }
     if (Loadout.startingWeapon != null) {
       _p.weapon = Loadout.startingWeapon!;
     }
@@ -4093,6 +4256,8 @@ class _GameScreenState extends State<GameScreen>
       _spawnEnemy();
       _toSpawn--;
       _spawnTimer = (0.85 - _wave * 0.012).clamp(0.28, 0.85).toDouble();
+      // PACT · JURY SUMMONS: spawn pacing 30% tighter.
+      if (pactOn('jury_summons')) _spawnTimer *= 0.7;
     }
 
     final atkRange = _p.weapon.kind == WeaponKind.ranged
@@ -4277,7 +4442,9 @@ class _GameScreenState extends State<GameScreen>
         } else {
           e.novaT -= dt;
           if (e.novaT <= 0) {
-            e.novaTele = 1.1; // 1.1s telegraph window
+            // PACT · ROUTINE INSPECTION shortens boss windups so dodges
+            // have less margin.
+            e.novaTele = pactOn('routine_insp') ? 0.66 : 1.1;
           }
         }
       }
@@ -4426,7 +4593,8 @@ class _GameScreenState extends State<GameScreen>
           _bursts.add(Burst(e.pos, 96));
           _shake = max(_shake, 7.0);
           Sfx.play('kill', vol: 0.75);
-          _hurtPlayer(e.damage * 1.6);
+          // PACT · BURSTING WRATH amplifies the kamikaze AoE punch.
+          _hurtPlayer(e.damage * (pactOn('bursting_wrath') ? 2.4 : 1.6));
           e.hp = 0;
         } else {
           if (e.kind == 6 && !_p.frostImmune) {
@@ -5008,6 +5176,8 @@ class _GameScreenState extends State<GameScreen>
         e.damage *= Loadout.enemyMul;
         e.speed *= 1 + Loadout.heat * 0.03;
       }
+      // PACT · HARD LABOR: stacks +25% HP on top of the heat multiplier.
+      if (pactOn('hard_labor')) e.hp *= 1.25;
       // Pick bolt flavor for ranged shooters based on floor depth.
       if (e.kind == 4) {
         final r = _rng.nextDouble();
@@ -5084,7 +5254,8 @@ class _GameScreenState extends State<GameScreen>
     final out = <Upgrade>[];
     for (final u in bag) {
       if (!out.contains(u)) out.add(u);
-      if (out.length == 3) break;
+      // PACT · APPROVAL PROCESS shrinks the choice down to 2 boons.
+      if (out.length == (pactOn('approval_proc') ? 2 : 3)) break;
     }
     // Clear the patron after this offer so future random doors stay random.
     _pendingBoonGod = null;
@@ -5162,7 +5333,9 @@ class _GameScreenState extends State<GameScreen>
       DoorDef('💰', 'TREASURE', '+${12 + fi * 8} obols', DoorKind.reward,
           (p) => p.obols += 12 + fi * 8),
       DoorDef('❤', 'FOUNTAIN', 'heal 45% + 50% MP', DoorKind.reward, (p) {
-        p.hp = (p.hp + p.maxHp * 0.45).clamp(0, p.maxHp).toDouble();
+        // PACT · LASTING CONSEQUENCES halves the heal portion.
+        final mul = pactOn('lasting_cons') ? 0.5 : 1.0;
+        p.hp = (p.hp + p.maxHp * 0.45 * mul).clamp(0, p.maxHp).toDouble();
         p.mp = (p.mp + p.maxMp * 0.5).clamp(0, p.maxMp).toDouble();
       }),
       // Pick a god patron up-front so the door previews who's offering.
@@ -5473,9 +5646,13 @@ class _GameScreenState extends State<GameScreen>
     ];
   }
 
+  int _shopPrice(ShopItem it) =>
+      pactOn('convenience_fee') ? (it.price * 1.5).round() : it.price;
+
   void _buy(ShopItem it) {
-    if (it.sold || _p.obols < it.price) return;
-    _p.obols -= it.price;
+    final cost = _shopPrice(it);
+    if (it.sold || _p.obols < cost) return;
+    _p.obols -= cost;
     it.apply(_p);
     setState(() => it.sold = true);
   }
@@ -6272,7 +6449,7 @@ class _GameScreenState extends State<GameScreen>
                     color: const Color(0xFF1F1D2E),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                        color: _p.obols >= it.price && !it.sold
+                        color: _p.obols >= _shopPrice(it) && !it.sold
                             ? const Color(0xFFFFD45E)
                             : Colors.white24),
                   ),
@@ -6293,7 +6470,7 @@ class _GameScreenState extends State<GameScreen>
                           ],
                         ),
                       ),
-                      Text('💰${it.price}',
+                      Text('💰${_shopPrice(it)}',
                           style: const TextStyle(
                               fontWeight: FontWeight.w900,
                               color: Color(0xFFFFD45E))),
