@@ -5848,8 +5848,8 @@ class _GameScreenState extends State<GameScreen>
     return Positioned(
       top: 0,
       left: 0,
-      // Leave the top-right corner for the minimap.
-      right: 116,
+      // Leave room only for the pause button in the top-right corner.
+      right: 48,
       child: SafeArea(
         bottom: false,
         child: Padding(
@@ -7114,8 +7114,6 @@ class WorldPainter extends CustomPainter {
       );
     }
 
-    _paintMinimap(canvas, size, m);
-
     if (stickOn) {
       canvas.drawCircle(stickOrigin, 60,
           Paint()..color = Colors.white.withValues(alpha: 0.07));
@@ -8155,47 +8153,6 @@ class WorldPainter extends CustomPainter {
       dr(tx.color, tx.pos);
       }));
     }
-  }
-
-  void _paintMinimap(Canvas canvas, Size size, GameMap m) {
-    const mw = 92.0;
-    final mh = mw * (m.worldH / m.worldW);
-    final ox = size.width - mw - 14;
-    final oy = 14.0;
-    final rect = Rect.fromLTWH(ox, oy, mw, mh);
-    canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, const Radius.circular(6)),
-        Paint()..color = Colors.black.withValues(alpha: 0.5));
-    final fp = Paint()..color = floor.bg.withValues(alpha: 0.9);
-    final sx = mw / m.cols;
-    final sy = mh / m.rows;
-    for (var r = 0; r < m.rows; r++) {
-      for (var c = 0; c < m.cols; c++) {
-        if (m.tile(c, r)) {
-          canvas.drawRect(
-              Rect.fromLTWH(ox + c * sx, oy + r * sy, sx + 0.6, sy + 0.6),
-              fp);
-        }
-      }
-    }
-    canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, const Radius.circular(6)),
-        Paint()
-          ..color = Colors.white24
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1);
-    Offset mp(Offset w) =>
-        Offset(ox + w.dx / m.worldW * mw, oy + w.dy / m.worldH * mh);
-    final ep = Paint()..color = const Color(0xFFFF5C6C);
-    for (final e in enemies) {
-      canvas.drawCircle(mp(e.pos), 1.6, ep);
-    }
-    final dp = Paint()..color = const Color(0xFFFFD45E);
-    for (final dr in doors) {
-      canvas.drawCircle(mp(dr.pos), 3, dp);
-    }
-    canvas.drawCircle(
-        mp(player.pos), 3, Paint()..color = const Color(0xFF8CFF98));
   }
 
   @override
