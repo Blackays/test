@@ -5065,9 +5065,16 @@ class _GameScreenState extends State<GameScreen>
     _phase = Phase.levelUp;
   }
 
+  // If non-null, the next boon offer is filtered to that god's pool — set
+  // when the player walks through a god-branded boon door.
+  String? _pendingBoonGod;
+
   List<Upgrade> _rollUpgrades() {
+    final pool = _pendingBoonGod == null
+        ? kUpgrades
+        : kUpgrades.where((u) => u.god == _pendingBoonGod).toList();
     final bag = <Upgrade>[];
-    for (final u in kUpgrades) {
+    for (final u in pool) {
       final n = u.tier == 0 ? 4 : (u.tier == 1 ? 2 : 1);
       for (var i = 0; i < n; i++) {
         bag.add(u);
@@ -5079,6 +5086,8 @@ class _GameScreenState extends State<GameScreen>
       if (!out.contains(u)) out.add(u);
       if (out.length == 3) break;
     }
+    // Clear the patron after this offer so future random doors stay random.
+    _pendingBoonGod = null;
     return out;
   }
 
@@ -5156,7 +5165,8 @@ class _GameScreenState extends State<GameScreen>
         p.hp = (p.hp + p.maxHp * 0.45).clamp(0, p.maxHp).toDouble();
         p.mp = (p.mp + p.maxMp * 0.5).clamp(0, p.maxMp).toDouble();
       }),
-      DoorDef('✦', 'BOON', 'pick a power-up', DoorKind.boon, (_) {}),
+      // Pick a god patron up-front so the door previews who's offering.
+      _godBoonDoor(),
       DoorDef('🗡', 'ARSENAL', '+1 projectile', DoorKind.reward,
           (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt()),
       DoorDef('👁', 'WATCHTOWER', '+0.2 view', DoorKind.reward,
@@ -5174,6 +5184,21 @@ class _GameScreenState extends State<GameScreen>
           DoorKind.respite, (_) {}),
     ]..shuffle(_rng);
     return pool.take(n.clamp(2, pool.length).toInt()).toList();
+  }
+
+  // A god-branded boon door — rolls a patron, previews them on the door,
+  // and primes the offer pool so the picker shows only their boons.
+  DoorDef _godBoonDoor() {
+    final g = kGods[_rng.nextInt(kGods.length)];
+    return DoorDef(
+      g.icon,
+      "${g.name}'S BOON",
+      '${g.theme} · pick a blessing',
+      DoorKind.boon,
+      (_) {
+        _pendingBoonGod = g.id;
+      },
+    );
   }
 
   DoorDef _chaosDoor() {
@@ -6175,16 +6200,39 @@ class _GameScreenState extends State<GameScreen>
   }
 
   Widget _levelUpOverlay() {
+    // If every offered boon belongs to the same god, show a god banner on
+    // top of the picker — turns level-up into a god offering moment.
+    final firstGod = _choices.isEmpty ? null : _choices.first.god;
+    final allSame =
+        firstGod != null && _choices.every((u) => u.god == firstGod);
+    final patron = allSame ? godById(firstGod) : null;
     return _scrim(Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Text('LEVEL UP!',
-            style: TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFF8CFF98))),
-        const SizedBox(height: 4),
-        const Text('pick a boon', style: TextStyle(color: Colors.white60)),
+        if (patron != null) ...[
+          Text('${patron.icon}  ${patron.name}',
+              style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                  color: patron.color,
+                  letterSpacing: 3)),
+          const SizedBox(height: 2),
+          Text('OFFERS A BOON · ${patron.theme}',
+              style: const TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 10,
+                  letterSpacing: 2)),
+        ] else ...[
+          const Text('LEVEL UP!',
+              style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF8CFF98))),
+          const SizedBox(height: 4),
+          const Text('pick a boon',
+              style: TextStyle(color: Colors.white60)),
+        ],
         const SizedBox(height: 18),
         for (final u in _choices)
           Padding(
@@ -6405,11 +6453,42 @@ class _GameScreenState extends State<GameScreen>
 /// Upgrades / shop
 /// ---------------------------------------------------------------------------
 class Upgrade {
-  const Upgrade(this.title, this.desc, this.tier, this.apply);
+  const Upgrade(this.title, this.desc, this.tier, this.apply, {this.god});
   final String title;
   final String desc;
   final int tier;
   final void Function(Player p) apply;
+  // Optional god patron — controls the door label, picker frame, and
+  // which boon pool the door rolls from. null = misc / non-god boon.
+  final String? god;
+}
+
+class God {
+  const God(this.id, this.name, this.icon, this.color, this.theme);
+  final String id;
+  final String name;
+  final String icon;
+  final Color color;
+  final String theme;
+}
+
+const List<God> kGods = [
+  God('zeus', 'ZEUS', '⚡', Color(0xFFFFE066), 'lightning'),
+  God('ares', 'ARES', '🩸', Color(0xFFFF5C6C), 'doom · bleed'),
+  God('poseidon', 'POSEIDON', '🌊', Color(0xFF4CD2C0), 'knockback'),
+  God('athena', 'ATHENA', '🛡', Color(0xFFE0A0FF), 'defense · dash'),
+  God('aphrodite', 'APHRODITE', '💖', Color(0xFFFF8AB4), 'lifesteal'),
+  God('hermes', 'HERMES', '👟', Color(0xFFFFB347), 'speed · rate'),
+  God('demeter', 'DEMETER', '❄', Color(0xFFA9E8FF), 'chill · slow'),
+  God('hephaestus', 'HEPHAESTUS', '🔨', Color(0xFFFFA84C), 'splash · forge'),
+];
+
+God? godById(String? id) {
+  if (id == null) return null;
+  for (final g in kGods) {
+    if (g.id == id) return g;
+  }
+  return null;
 }
 
 const Color _cCommon = Color(0xFF8CFF98);
@@ -6418,62 +6497,123 @@ const Color _cEpic = Color(0xFFE0A0FF);
 Color _tierColor(int t) => t == 0 ? _cCommon : (t == 1 ? _cRare : _cEpic);
 
 final List<Upgrade> kUpgrades = [
+  // — Generic / non-god boons (no patron, always available).
   Upgrade('MUCH DAMAGE', '+1 damage', 0, (p) => p.damage += 1),
   Upgrade('VERY SPEED', '+18 move speed', 0, (p) => p.speed += 18),
   Upgrade('SO TANKY', '+3 max HP & heal', 0, (p) {
     p.maxHp += 3;
     p.hp = (p.hp + 3).clamp(0, p.maxHp).toDouble();
   }),
-  Upgrade('REGEN', '+0.6 HP / sec', 0, (p) => p.regen += 0.6),
   Upgrade('LONG REACH', '+70 range', 0, (p) => p.range += 70),
-  Upgrade('FAST BONK', '+90 projectile speed', 0, (p) => p.projSpeed += 90),
   Upgrade('BIG BRAIN', '+2 max MP', 0, (p) {
     p.maxMp += 2;
     p.mp += 2;
   }),
-  Upgrade('WOW CRIT', '+9% crit chance', 1, (p) => p.critChance += 0.09),
-  Upgrade('RAPID BONK', '+24% attack speed', 1,
-      (p) => p.fireInterval = (p.fireInterval * 0.76).clamp(0.05, 5).toDouble()),
-  Upgrade('VAMPIRE', '+0.4 HP per kill', 1, (p) => p.lifesteal += 0.4),
-  Upgrade('PLAGUE', '+1.5 poison dps', 1, (p) => p.dot += 1.5),
-  Upgrade('SPIKES', '+1 thorns damage', 1, (p) => p.thorns += 1),
-  Upgrade('FOCUS', '+0.7 MP regen', 1, (p) => p.mpRegen += 0.7),
-  Upgrade('DOUBLE SHOT', 'fire a 2nd volley', 1,
-      (p) => p.volleys = (p.volleys + 1).clamp(1, 4).toInt()),
-  Upgrade('MULTI BONK', '+1 projectile', 2,
-      (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt()),
-  Upgrade('BIG BOOM', '+24 splash radius', 2, (p) => p.splash += 24),
-  Upgrade('PIERCING', '+2 pierce', 2,
-      (p) => p.pierce = (p.pierce + 2).clamp(0, 12).toInt()),
-  Upgrade('EAGLE EYE', 'see way more of the room', 2,
-      (p) => p.vision = (p.vision + 0.35).clamp(1.0, 2.8).toDouble()),
-  // god boons
-  Upgrade('POSEIDON: WAVE', 'hits knock enemies back', 1,
-      (p) => p.knockback += 26),
-  Upgrade('ATHENA: SWIFT', '-0.35s dash cooldown', 1,
-      (p) => p.dashCd = (p.dashCd - 0.35).clamp(0.4, 5).toDouble()),
-  Upgrade('ARES: DOOM', 'hits plant a delayed burst', 2,
-      (p) => p.doomAmt += 7),
-  Upgrade('ZEUS: CHAIN', 'attacks chain to +1 enemy', 2,
-      (p) => p.zeus += 1),
-  // New boons
   Upgrade('IRON GUT', '+5 max HP & full heal', 0, (p) {
     p.maxHp += 5;
     p.hp = p.maxHp;
   }),
-  Upgrade('MANA TIDE', '+1.0 MP regen', 1, (p) => p.mpRegen += 1.0),
-  Upgrade('GLASS CANNON', '+50% damage, −25% max HP', 2, (p) {
+  Upgrade('PLAGUE', '+1.5 poison dps', 1, (p) => p.dot += 1.5),
+  Upgrade('SPIKES', '+1 thorns damage', 1, (p) => p.thorns += 1),
+  Upgrade('DOUBLE SHOT', 'fire a 2nd volley', 1,
+      (p) => p.volleys = (p.volleys + 1).clamp(1, 4).toInt()),
+  Upgrade('GLASS CANNON', '+50% damage, -25% max HP', 2, (p) {
     p.damage *= 1.5;
     p.maxHp = (p.maxHp * 0.75).clamp(1, 9999).toDouble();
     p.hp = p.hp.clamp(1, p.maxHp).toDouble();
   }),
   Upgrade('SECOND WIND', '+1 Death Defiance', 2, (p) => p.revives += 1),
-  Upgrade('FROST WALKER', 'immune to chill', 1,
-      (p) => p.frostImmune = true),
-  Upgrade('HERMES: HASTE', '+30 move speed & −0.2s dash CD', 2, (p) {
+
+  // — ZEUS · lightning chains + crit
+  Upgrade('LIGHTNING STRIKE', 'attacks chain to +1 enemy', 2,
+      (p) => p.zeus += 1,
+      god: 'zeus'),
+  Upgrade('THUNDER RUSH', '+9% crit chance', 1,
+      (p) => p.critChance += 0.09,
+      god: 'zeus'),
+  Upgrade('STATIC FIELD', '+90 projectile speed', 0,
+      (p) => p.projSpeed += 90,
+      god: 'zeus'),
+  Upgrade('STORM CALLER', 'attacks chain to +2 enemies', 2,
+      (p) => p.zeus += 2,
+      god: 'zeus'),
+
+  // — ARES · doom & bleed
+  Upgrade('CURSE OF AGONY', 'hits plant a delayed burst', 2,
+      (p) => p.doomAmt += 7,
+      god: 'ares'),
+  Upgrade('BLOOD FRENZY', '+2 damage', 1, (p) => p.damage += 2,
+      god: 'ares'),
+  Upgrade('SLAUGHTER', '+18 splash radius', 1, (p) => p.splash += 18,
+      god: 'ares'),
+  Upgrade('MERCILESS DOOM', '+12 extra doom damage', 2,
+      (p) => p.doomAmt += 12,
+      god: 'ares'),
+
+  // — POSEIDON · knockback & shatter
+  Upgrade('TIDAL DASH', 'hits knock enemies back', 1,
+      (p) => p.knockback += 26,
+      god: 'poseidon'),
+  Upgrade('TEMPEST', '+34 knockback', 2, (p) => p.knockback += 34,
+      god: 'poseidon'),
+  Upgrade('SEA FURY', '+1 projectile', 2,
+      (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt(),
+      god: 'poseidon'),
+
+  // — ATHENA · defense & dash
+  Upgrade('DEFLECT', '-0.35s dash cooldown', 1,
+      (p) => p.dashCd = (p.dashCd - 0.35).clamp(0.4, 5).toDouble(),
+      god: 'athena'),
+  Upgrade('BULWARK', '+8 max HP', 1, (p) {
+    p.maxHp += 8;
+    p.hp = (p.hp + 8).clamp(0, p.maxHp).toDouble();
+  }, god: 'athena'),
+  Upgrade('DIVINE STAND', '+1 Death Defiance', 2, (p) => p.revives += 1,
+      god: 'athena'),
+  Upgrade('STEELED MIND', '+1.0 MP regen', 1, (p) => p.mpRegen += 1.0,
+      god: 'athena'),
+
+  // — APHRODITE · charm & heal
+  Upgrade('HEARTBREAKER', '+0.5 HP per kill', 1,
+      (p) => p.lifesteal += 0.5,
+      god: 'aphrodite'),
+  Upgrade('DEVOTION', '+0.6 HP/sec regen', 1, (p) => p.regen += 0.6,
+      god: 'aphrodite'),
+  Upgrade('PASSION FLARE', '+0.8 HP per kill', 2,
+      (p) => p.lifesteal += 0.8,
+      god: 'aphrodite'),
+
+  // — HERMES · speed & attack rate
+  Upgrade('GREATER HASTE', '+30 move speed & -0.2s dash CD', 2, (p) {
     p.speed += 30;
     p.dashCd = (p.dashCd - 0.2).clamp(0.4, 5).toDouble();
-  }),
+  }, god: 'hermes'),
+  Upgrade('SIDESTEP', '+20 move speed', 0, (p) => p.speed += 20,
+      god: 'hermes'),
+  Upgrade('QUICK STRIKE', '+24% attack speed', 1,
+      (p) => p.fireInterval =
+          (p.fireInterval * 0.76).clamp(0.05, 5).toDouble(),
+      god: 'hermes'),
+
+  // — DEMETER · chill & vision
+  Upgrade('FROST WARD', 'immune to chill', 1,
+      (p) => p.frostImmune = true,
+      god: 'demeter'),
+  Upgrade('WINTER WATCH', '+0.35 vision range', 2,
+      (p) => p.vision = (p.vision + 0.35).clamp(1.0, 2.8).toDouble(),
+      god: 'demeter'),
+  Upgrade('GENTLE SNOW', '+0.6 HP/sec', 0, (p) => p.regen += 0.6,
+      god: 'demeter'),
+
+  // — HEPHAESTUS · splash & forge
+  Upgrade('SMITH-FORGED', '+24 splash radius', 2, (p) => p.splash += 24,
+      god: 'hephaestus'),
+  Upgrade('HEAVY METAL', '+2 pierce', 2,
+      (p) => p.pierce = (p.pierce + 2).clamp(0, 12).toInt(),
+      god: 'hephaestus'),
+  Upgrade('FORGED RHYTHM', '+1 projectile', 2,
+      (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt(),
+      god: 'hephaestus'),
 ];
 
 class ShopItem {
@@ -6494,6 +6634,7 @@ class _UpgradeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = _tierColor(u.tier);
     final tn = u.tier == 0 ? 'COMMON' : (u.tier == 1 ? 'RARE' : 'EPIC');
+    final patron = godById(u.god);
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: onTap,
@@ -6503,7 +6644,8 @@ class _UpgradeCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFF1F1D2E),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: c, width: 1.8),
+          border: Border.all(
+              color: patron?.color ?? c, width: patron != null ? 2 : 1.6),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -6526,6 +6668,15 @@ class _UpgradeCard extends StatelessWidget {
             const SizedBox(height: 2),
             Text(u.desc,
                 style: const TextStyle(color: Colors.white60, fontSize: 13)),
+            if (patron != null) ...[
+              const SizedBox(height: 4),
+              Text('${patron.icon}  ${patron.name}',
+                  style: TextStyle(
+                      color: patron.color,
+                      fontSize: 10,
+                      letterSpacing: 1.8,
+                      fontWeight: FontWeight.w900)),
+            ],
           ],
         ),
       ),
