@@ -3716,6 +3716,10 @@ class _GameScreenState extends State<GameScreen>
   int _lastIntroFloor = -1;
   // Run-scoped trackers, reset at _initRun and read on the end overlay.
   final List<String> _runBoons = [];
+  // Gods the player has accepted a boon from this run — gates duo unlocks.
+  final Set<String> _runGods = {};
+  // Build-panel overlay: tap the in-game boon strip to inspect everything.
+  bool _showBuild = false;
   double _runTime = 0;
   int _runMaxCombo = 0;
   int _runStartNectar = 0;
@@ -3954,6 +3958,8 @@ class _GameScreenState extends State<GameScreen>
     _entryCorner = 2 + _rng.nextInt(2); // either lower-left or lower-right
     _lastIntroFloor = -1; // force the F1 banner on the first room of a run
     _runBoons.clear();
+    _runGods.clear();
+    _showBuild = false;
     _runTime = 0;
     _runMaxCombo = 0;
     _runStartNectar = NpcStore.nectar;
@@ -5240,12 +5246,26 @@ class _GameScreenState extends State<GameScreen>
   String? _pendingBoonGod;
 
   List<Upgrade> _rollUpgrades() {
-    final pool = _pendingBoonGod == null
-        ? kUpgrades
-        : kUpgrades.where((u) => u.god == _pendingBoonGod).toList();
+    // Base pool: god-locked door → only that god's boons; otherwise all.
+    // Either way, drop duo boons the player can't yet unlock and any boon
+    // already taken this run (no duplicates in the offer).
+    bool eligible(Upgrade u) {
+      if (_runBoons.contains(u.title)) return false;
+      if (u.god2 != null) {
+        return _runGods.contains(u.god!) && _runGods.contains(u.god2!);
+      }
+      return _pendingBoonGod == null || u.god == _pendingBoonGod;
+    }
+
+    final pool = kUpgrades.where(eligible).toList();
     final bag = <Upgrade>[];
     for (final u in pool) {
-      final n = u.tier == 0 ? 4 : (u.tier == 1 ? 2 : 1);
+      // Duo boons are intentionally rare — they share their tier-2 weight.
+      final n = u.god2 != null
+          ? 1
+          : u.tier == 0
+              ? 4
+              : (u.tier == 1 ? 2 : 1);
       for (var i = 0; i < n; i++) {
         bag.add(u);
       }
@@ -5265,6 +5285,8 @@ class _GameScreenState extends State<GameScreen>
   void _pickUpgrade(Upgrade u) {
     u.apply(_p);
     _runBoons.add(u.title);
+    if (u.god != null) _runGods.add(u.god!);
+    if (u.god2 != null) _runGods.add(u.god2!);
     NpcStore.bumpQuest('scribe', 1);
     _texts.add(FloatText(_p.pos.translate(0, -_p.radius - 14), u.title,
         const Color(0xFF8CFF98)));
@@ -5667,9 +5689,17 @@ class _GameScreenState extends State<GameScreen>
 
   void _panStart(DragStartDetails d) {
     if (_phase != Phase.playing && _phase != Phase.roomCleared) return;
+    if (_showBuild) return;
     if (_abilityRect.contains(d.localPosition)) return;
     if (_dashRect.contains(d.localPosition)) return;
     if (_pauseRect.contains(d.localPosition)) return;
+    // Boon strip lives in the bottom-left corner. Ignore drags that
+    // start in its rectangle so tapping it doesn't also fling the stick.
+    if (_runBoons.isNotEmpty &&
+        d.localPosition.dx < 220 &&
+        d.localPosition.dy > _size.height - 50) {
+      return;
+    }
     _stickOn = true;
     _stickOrigin = d.localPosition;
     _stickKnob = d.localPosition;
@@ -5757,6 +5787,7 @@ class _GameScreenState extends State<GameScreen>
                 if (_ready) _hud(),
                 if (_ready && _combo > 1) _comboBadge(),
                 if (_ready && _runBoons.isNotEmpty) _runBoonsStrip(),
+                if (_ready && _showBuild) _buildPanelOverlay(),
                 if (_ready) _bossBar(),
                 if (_ready && _bossIntroT > 0 && _bossIntro != null)
                   _bossIntroOverlay(),
@@ -6130,8 +6161,9 @@ class _GameScreenState extends State<GameScreen>
     return Positioned(
       left: 10,
       bottom: 16,
-      child: IgnorePointer(
-        ignoring: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showBuild = true),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
@@ -6168,8 +6200,144 @@ class _GameScreenState extends State<GameScreen>
                           letterSpacing: 0.5)),
                 ),
               ),
+            const SizedBox(width: 4),
+            const Icon(Icons.unfold_more,
+                size: 12, color: Color(0xFF8CFF98)),
           ]),
         ),
+      ),
+    );
+  }
+
+  // Full build panel: every boon, grouped by patron, with totals. The
+  // _runGods set drives both ordering and the "DUOS UNLOCKED" hint.
+  Widget _buildPanelOverlay() {
+    final groups = <String?, List<Upgrade>>{};
+    for (final title in _runBoons) {
+      final u = kUpgrades.firstWhere((x) => x.title == title,
+          orElse: () =>
+              const Upgrade('?', '', 0, _noopApply));
+      (groups[u.god] ??= []).add(u);
+    }
+    // Sort keys: gods first (in kGods order), then misc/null.
+    final orderedKeys = <String?>[
+      ...kGods.map((g) => g.id).where((id) => groups.containsKey(id)),
+      if (groups.containsKey(null)) null,
+    ];
+
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showBuild = false),
+        child: Container(
+          color: const Color(0xCC0A0814),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+          child: GestureDetector(
+            onTap: () {}, // swallow taps inside the panel
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 380),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xEE1F1D2E),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: const Color(0xFF8CFF98), width: 1.4),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Text('YOUR BUILD · ${_runBoons.length} boons',
+                        style: const TextStyle(
+                            color: Color(0xFF8CFF98),
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14,
+                            letterSpacing: 1.6)),
+                    const Spacer(),
+                    Text('tap to close',
+                        style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 10)),
+                  ]),
+                  const SizedBox(height: 6),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (_runBoons.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                  'no boons picked yet — clear rooms + walk through ✦ doors',
+                                  style: TextStyle(
+                                      color: Colors.white54, fontSize: 12)),
+                            ),
+                          for (final key in orderedKeys)
+                            _buildGroup(key, groups[key]!),
+                          if (_runGods.length >= 2)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                  'patrons accepted: ${_runGods.map((id) => godById(id)?.icon ?? '?').join(' ')}',
+                                  style: const TextStyle(
+                                      color: Colors.white70, fontSize: 11)),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroup(String? godId, List<Upgrade> ups) {
+    final g = godById(godId);
+    final color = g?.color ?? const Color(0xFF8CFF98);
+    final header = g == null
+        ? 'GENERIC · ${ups.length}'
+        : '${g.icon} ${g.name} · ${ups.length}';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(header,
+              style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 11,
+                  letterSpacing: 1.4)),
+          const SizedBox(height: 3),
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              for (final u in ups)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF14131F),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                        color: color.withValues(alpha: 0.6), width: 0.8),
+                  ),
+                  child: Text(
+                      u.god2 != null ? '${u.title} 🤝' : u.title,
+                      style:
+                          TextStyle(color: color, fontSize: 10)),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -6629,8 +6797,12 @@ class _GameScreenState extends State<GameScreen>
 /// ---------------------------------------------------------------------------
 /// Upgrades / shop
 /// ---------------------------------------------------------------------------
+// Fallback apply for the rare orElse path in the build panel — never runs.
+void _noopApply(Player p) {}
+
 class Upgrade {
-  const Upgrade(this.title, this.desc, this.tier, this.apply, {this.god});
+  const Upgrade(this.title, this.desc, this.tier, this.apply,
+      {this.god, this.god2});
   final String title;
   final String desc;
   final int tier;
@@ -6638,6 +6810,9 @@ class Upgrade {
   // Optional god patron — controls the door label, picker frame, and
   // which boon pool the door rolls from. null = misc / non-god boon.
   final String? god;
+  // Duo boons share favor between two gods; their card shows both icons
+  // and they only appear in offers once the player has both patrons.
+  final String? god2;
 }
 
 class God {
@@ -6791,6 +6966,32 @@ final List<Upgrade> kUpgrades = [
   Upgrade('FORGED RHYTHM', '+1 projectile', 2,
       (p) => p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt(),
       god: 'hephaestus'),
+
+  // ─── DUO BOONS · only appear once the player has both patrons ───
+  Upgrade('BIG BANG', '+1 projectile & +1 chain', 2, (p) {
+    p.projectiles = (p.projectiles + 1).clamp(1, 8).toInt();
+    p.zeus += 1;
+  }, god: 'zeus', god2: 'hephaestus'),
+  Upgrade('BLOODY CHARM', '+0.6 lifesteal & +5 doom', 2, (p) {
+    p.lifesteal += 0.6;
+    p.doomAmt += 5;
+  }, god: 'ares', god2: 'aphrodite'),
+  Upgrade('TIDAL SPRINT', '+24 knockback & +24 move speed', 2, (p) {
+    p.knockback += 24;
+    p.speed += 24;
+  }, god: 'poseidon', god2: 'hermes'),
+  Upgrade('ICY GUARD', 'frost-immune & -0.25s dash CD', 2, (p) {
+    p.frostImmune = true;
+    p.dashCd = (p.dashCd - 0.25).clamp(0.4, 5).toDouble();
+  }, god: 'athena', god2: 'demeter'),
+  Upgrade('SHOCKING LOVE', '+0.5 lifesteal & +1 chain', 2, (p) {
+    p.lifesteal += 0.5;
+    p.zeus += 1;
+  }, god: 'zeus', god2: 'aphrodite'),
+  Upgrade('HOT FORGE', '+18 splash & +6 doom', 2, (p) {
+    p.splash += 18;
+    p.doomAmt += 6;
+  }, god: 'hephaestus', god2: 'ares'),
 ];
 
 class ShopItem {
